@@ -1,17 +1,39 @@
+import { inspect } from "node:util";
 import { CommerceError, money, requireThat } from "../catalog.js";
-import { eventReference, paypalLinkId } from "../webhook-reference.js";
+import {
+  eventReference,
+  paypalLinkId,
+  isRefundResource,
+} from "../webhook-reference.js";
 export const SANDBOX = "https://api-m.sandbox.paypal.com";
 export class PayPalSandboxProvider {
   name = "paypal-sandbox";
+  #oauthAuthorization;
   constructor(config, fetcher = fetch) {
     requireThat((config.baseUrl ?? SANDBOX) === SANDBOX, "sandbox_only");
+    const headerMode =
+      typeof config.oauthBasicAuthHeader === "string" &&
+      config.oauthBasicAuthHeader.length > 0;
     requireThat(
-      config.clientId &&
-        config.clientSecret &&
-        config.webhookId &&
-        config.merchantId,
+      !(headerMode && (config.clientId || config.clientSecret)),
+      "paypal_auth_modes_conflict",
+    );
+    requireThat(
+      config.webhookId &&
+        config.merchantId &&
+        (headerMode || (config.clientId && config.clientSecret)),
       "paypal_configuration_required",
     );
+    if (headerMode)
+      requireThat(
+        config.oauthBasicAuthHeader.length <= 8192 &&
+          !/[\r\n\0]/.test(config.oauthBasicAuthHeader),
+        "invalid_paypal_auth_header",
+      );
+    this.#oauthAuthorization = headerMode
+      ? config.oauthBasicAuthHeader
+      : `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")}`;
+    this.authMode = headerMode ? "opaque-header" : "client-pair";
     const origin = new URL(config.origin);
     requireThat(
       origin.origin === config.origin &&
@@ -19,22 +41,48 @@ export class PayPalSandboxProvider {
           ["localhost", "127.0.0.1"].includes(origin.hostname)),
       "invalid_origin",
     );
-    this.config = config;
+    // Keep authentication values out of enumerable configuration and diagnostics.
+    this.config = {
+      origin: config.origin,
+      webhookId: config.webhookId,
+      merchantId: config.merchantId,
+      webhookBudget: config.webhookBudget,
+    };
     this.fetcher = fetcher;
   }
+  toJSON() {
+    return {
+      provider: this.name,
+      authMode: this.authMode,
+      authorization: "[REDACTED]",
+    };
+  }
+  [inspect.custom]() {
+    return this.toJSON();
+  }
   async token() {
-    const res = await this.fetcher(`${SANDBOX}/v1/oauth2/token`, {
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(10000),
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString("base64")}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: "grant_type=client_credentials",
-    });
+    let res;
+    try {
+      res = await this.fetcher(`${SANDBOX}/v1/oauth2/token`, {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          Authorization: this.#oauthAuthorization,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: "grant_type=client_credentials",
+      });
+    } catch {
+      throw new CommerceError("paypal_auth_transport_failed", 502);
+    }
     if (!res.ok) throw new CommerceError("paypal_auth_failed", 502);
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new CommerceError("paypal_auth_response_failed", 502);
+    }
     requireThat(
       typeof data.access_token === "string",
       "paypal_invalid_token",
@@ -202,7 +250,7 @@ export class PayPalSandboxProvider {
   }
   async eventReference(event) {
     const ref = eventReference(event);
-    if (event.event_type !== "PAYMENT.CAPTURE.REFUNDED") return ref;
+    if (!isRefundResource(event)) return ref;
     const refundId = event.resource?.id;
     requireThat(
       typeof refundId === "string" && /^[A-Za-z0-9-]+$/.test(refundId),

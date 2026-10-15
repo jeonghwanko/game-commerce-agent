@@ -1,3 +1,4 @@
+import { costLimitedFetch } from "./ai-cost.js";
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
@@ -63,11 +64,13 @@ export function createApp({
       : new PayPalSandboxProvider({
           clientId: process.env.PAYPAL_CLIENT_ID,
           clientSecret: process.env.PAYPAL_CLIENT_SECRET,
+          oauthBasicAuthHeader: process.env.PAYPAL_OAUTH_BASIC_AUTH_HEADER,
           webhookId: process.env.PAYPAL_WEBHOOK_ID,
           merchantId: process.env.PAYPAL_MERCHANT_ID,
           webhookBudget: new ExternalWorkBudget(store, {
-            name: "paypal-webhooks",
-            limit: Number(process.env.WEBHOOK_TOTAL_VERIFY_LIMIT ?? 100),
+            name: "paypal-webhooks-window-v1",
+            windowMs: 60000,
+            limit: Number(process.env.WEBHOOK_WINDOW_VERIFY_LIMIT ?? 100),
             concurrency: 2,
           }),
           baseUrl: process.env.PAYPAL_BASE_URL,
@@ -77,17 +80,21 @@ export function createApp({
     mode: process.env.AI_PROVIDER ?? "mock",
     key: process.env.OPENAI_API_KEY,
     model: process.env.OPENAI_MODEL,
+    fetcher: costLimitedFetch(store),
   });
   if (recommender.mode === "openai")
     requireThat(
       authMode === "principal" && aiAccessEnabled && aiCallLimit > 0,
       "real_ai_access_not_authorized",
     );
-  const aiBudget = new ExternalWorkBudget(store, {
-    name: "ai-recommendations",
-    limit: aiCallLimit,
-    concurrency: 2,
-  });
+  const aiBudget =
+    recommender.mode === "openai"
+      ? new ExternalWorkBudget(store, {
+          name: "ai-recommendations",
+          limit: aiCallLimit,
+          concurrency: 2,
+        })
+      : null;
   const commerce = new Commerce(store, provider),
     game = new GameBridge(store);
   const inFlightAI = new Set();

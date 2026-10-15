@@ -272,3 +272,41 @@ footer {
 .outfit-caption {
   font-size: 0.8rem;
 }
+:focus-visible {
+  outline: 3px solid #d2f582;
+  outline-offset: 4px;
+}
+#global-error {
+  padding: 16px;
+  border: 2px solid #efb17e;
+  margin: 16px;
+}
+main > *,
+input,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+#preview {
+  max-width: 100%;
+  height: auto;
+}
+#quote,
+#status {
+  overflow-wrap: anywhere;
+}
+.busy a.action {
+  pointer-events: none;
+  opacity: 0.5;
+}
+@media (max-width: 420px) {
+  header {
+    flex-wrap: wrap;
+  }
+  .intro.wide h1 {
+    font-size: 2.5rem;
+  }
+  .panel {
+    padding: 16px;
+  }
+}

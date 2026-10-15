@@ -23,6 +23,18 @@ provider.capture = async (...args) => {
   return remote;
 };
 const { server, commerce } = createApp({ store, origin, provider });
+const handler = server.listeners("request")[0];
+server.removeAllListeners("request");
+let failInitialSession = true;
+server.on("request", (req, res) => {
+  if (req.url === "/api/session" && failInitialSession) {
+    failInitialSession = false;
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "simulated_session_unavailable" }));
+    return;
+  }
+  handler(req, res);
+});
 await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
 const browser = spawn(
   process.env.CHROMIUM ?? "chromium",
@@ -126,15 +138,43 @@ try {
         return;
       await new Promise((r) => setTimeout(r, 50));
     }
-    throw new Error(`UI timeout: ${expression}`);
+    throw new Error(
+      `UI timeout: ${expression}; ${JSON.stringify(await evaluate("({near:scene.near,target:scene.target,player:scene.player,focus:document.activeElement?.outerHTML})"))}`,
+    );
   };
   const click = async (label) => {
     await wait("true");
-    await evaluate(
-      `Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes(${JSON.stringify(label)})).click()`,
+    const point = await evaluate(
+      `(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes(${JSON.stringify(label)}) && !b.disabled && b.getClientRects().length); if(!b)throw new Error('Missing button '+${JSON.stringify(label)});b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+    );
+    await call(
+      "Input.dispatchMouseEvent",
+      { type: "mousePressed", button: "left", clickCount: 1, ...point },
+      sessionId,
+    );
+    await call(
+      "Input.dispatchMouseEvent",
+      { type: "mouseReleased", button: "left", clickCount: 1, ...point },
+      sessionId,
     );
   };
+  const typeGoal = async (text, budget) => {
+    await evaluate(
+      "document.querySelector('#goal').focus(); document.querySelector('#goal').select()",
+    );
+    await call("Input.insertText", { text }, sessionId);
+    await evaluate(
+      "document.querySelector('#budget').focus(); document.querySelector('#budget').select()",
+    );
+    await call("Input.insertText", { text: budget }, sessionId);
+  };
   await call("Page.navigate", { url: origin }, sessionId);
+  await wait("!document.querySelector('#global-error').hidden");
+  assert.equal(
+    await evaluate("document.querySelector('[data-walk]').disabled"),
+    true,
+  );
+  await click("Retry connection");
   await wait("document.querySelector('#mode')?.textContent.includes('MOCK')");
   await click("Walk to shop");
   await wait("scene.near === 'shop'");
@@ -147,15 +187,36 @@ try {
   );
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
   await screenshot("mock-preview");
-  await evaluate(
-    "{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('I confirm'));b.click();b.click();}",
-  );
+  await click("I confirm");
   await wait(
     "document.querySelector('#checkout').textContent.includes('Simulate buyer')",
   );
   assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 1);
-  await click("Verify / retry");
+  // Regression: selecting another quote must detach all previous payment controls.
+  await typeGoal("travel cloak", "1.00");
+  await click("Recommend outfits");
+  await wait(
+    "document.querySelector('#products').textContent.includes('Traveler')",
+  );
+  await click("Review purchase");
+  await wait(
+    "document.querySelector('#quote').textContent.includes('USD 0.99')",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('#checkout').children.length"),
+    0,
+    "new quote retains old order payment buttons",
+  );
+  await click("Return to pending purchase");
+  await wait(
+    "document.querySelector('#quote').textContent.includes('USD 1.99')",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('#checkout').dataset.orderId"),
+    store.get("SELECT id FROM orders LIMIT 1").id,
+  );
+  await click("Retry payment check");
   await wait(
     "document.querySelector('#status').textContent.includes('buyer_approval_required')",
   );
@@ -164,7 +225,7 @@ try {
   await wait(
     "document.querySelector('#status').textContent.includes('operation_failed')",
   );
-  await click("Verify / retry");
+  await click("Retry payment check");
   await wait(
     "document.querySelector('#status').textContent.includes('Waiting for a verified')",
   );
@@ -180,11 +241,11 @@ try {
     await provider.inspect(pendingOrder.provider_id),
     "mock-delayed-webhook",
   );
-  await click("Refresh verified status");
+  await click("Refresh saved status");
   await wait(
-    "document.querySelector('#wardrobe').textContent.includes('rosalyn-gala')",
+    "document.querySelector('#wardrobe').textContent.includes('Rosalyn Gala Outfit')",
   );
-  await click("Wear rosalyn-gala");
+  await click("Wear Rosalyn Gala Outfit");
   await wait(
     "document.querySelector('#requirements').textContent.includes('Formal outfit ✓')",
   );
@@ -213,7 +274,7 @@ try {
   await wait(
     "document.querySelector('#dialogue-text').textContent.includes('gate is open')",
   );
-  await evaluate("scene.target={x:900,y:235}");
+  await click("Enter the gathering");
   await wait("scene.arrived === true");
   await screenshot("mock-complete");
   await call("Page.reload", {}, sessionId);
@@ -233,9 +294,7 @@ try {
     Buffer.from(screenResult.data, "base64"),
   );
   // Second SKU exercises cancellation through actual rendered controls.
-  await evaluate(
-    "document.querySelector('#goal').value='travel cloak'; document.querySelector('#budget').value='1.00'",
-  );
+  await typeGoal("travel cloak", "1.00");
   await click("Recommend outfits");
   await wait(
     "document.querySelector('#products').textContent.includes('Traveler')",
@@ -250,7 +309,7 @@ try {
   );
   await click("Cancel checkout");
   await wait(
-    "document.querySelector('#status').textContent.includes('CANCELLED')",
+    "document.querySelector('#status').textContent.includes('Purchase cancelled')",
   );
   assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 1);
   const cancelled = store.get("SELECT id FROM orders WHERE status='CANCELLED'");
@@ -260,36 +319,113 @@ try {
     sessionId,
   );
   await wait(
-    "document.querySelector('#status')?.textContent.includes('CANCELLED')",
+    "document.querySelector('#status')?.textContent.includes('Purchase cancelled')",
   );
   assert.equal(
     await evaluate("document.querySelector('#checkout').children.length"),
     0,
   );
+  // Mobile pointer layout and 200% reflow, followed by a Tab/Enter-only free route.
+  await call(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
+    sessionId,
+  );
+  await call(
+    "Emulation.setEmulatedMedia",
+    { features: [{ name: "prefers-reduced-motion", value: "reduce" }] },
+    sessionId,
+  );
+  const key = async (key, code = key, modifiers = 0) => {
+    await call(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyDown",
+        key,
+        code,
+        modifiers,
+        text: key === "Enter" ? "\r" : undefined,
+        windowsVirtualKeyCode: key === "Tab" ? 9 : 13,
+      },
+      sessionId,
+    );
+    await call(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyUp",
+        key,
+        code,
+        modifiers,
+        windowsVirtualKeyCode: key === "Tab" ? 9 : 13,
+      },
+      sessionId,
+    );
+  };
+  const tabActivate = async (label) => {
+    await wait("true");
+    for (let i = 0; i < 100; i++) {
+      await wait("true");
+      if (
+        await evaluate(
+          `document.activeElement?.tagName==='BUTTON' && document.activeElement.textContent.includes(${JSON.stringify(label)}) && !document.activeElement.disabled`,
+        )
+      ) {
+        await key("Enter");
+        return;
+      }
+      const reverse = await evaluate(
+        `(()=>{const target=[...document.querySelectorAll('button')].find(b=>b.textContent.includes(${JSON.stringify(label)})&&!b.disabled);return !!(target && document.activeElement.compareDocumentPosition(target)&2);})()`,
+      );
+      await key("Tab", "Tab", reverse ? 8 : 0);
+    }
+    throw new Error("Tab unreachable: " + label);
+  };
   // A fresh browser session finishes the story entirely for free.
   await call("Network.clearBrowserCookies", {}, sessionId);
   await call("Page.navigate", { url: origin }, sessionId);
   await wait("document.querySelector('#mode')?.textContent.includes('MOCK')");
-  await click("Walk to shop");
+  assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"));
+  await evaluate("document.documentElement.style.zoom='2'");
+  assert.ok(
+    await evaluate("document.documentElement.scrollWidth<=innerWidth"),
+    "200% reflow overflow",
+  );
+  await screenshot("mobile-200-percent");
+  await evaluate("document.documentElement.style.zoom='1'");
+  await tabActivate("Walk to shop");
   await wait("scene.near === 'shop'");
-  await click("Talk to Rosalyn");
-  await click("Borrow formal clothes");
-  await click("Walk to courier");
+  await tabActivate("Talk to Rosalyn");
+  await tabActivate("Recommend outfits");
+  await wait("document.querySelectorAll('.product').length===1");
+  await tabActivate("Borrow formal clothes");
+  await wait(
+    "document.querySelector('#wardrobe').textContent.includes('Free loan')",
+  );
+  assert.ok(
+    await evaluate(
+      "document.querySelector('#plan').textContent.includes('state changed')",
+    ),
+  );
+  assert.equal(
+    await evaluate("document.querySelectorAll('.product').length"),
+    0,
+  );
+  await tabActivate("Walk to courier");
   await wait("scene.near === 'seal'");
-  await click("Talk to Courier");
-  await click("Accept the seal");
-  await click("Walk to archivist");
+  await tabActivate("Talk to Courier");
+  await tabActivate("Accept the seal");
+  await tabActivate("Walk to archivist");
   await wait("scene.near === 'rumor'");
-  await click("Talk to Archivist");
-  await click("Remember the rumor");
-  await click("Walk to guard");
+  await tabActivate("Talk to Archivist");
+  await tabActivate("Remember the rumor");
+  await tabActivate("Walk to guard");
   await wait("scene.near === 'guard'");
-  await click("Talk to Gatekeeper");
-  await evaluate("scene.target={x:900,y:235}");
+  await tabActivate("Talk to Gatekeeper");
+  await tabActivate("Enter the gathering");
   await wait("scene.arrived === true");
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 2);
   console.log(
-    "PASS Chromium: playable courtyard, preview, repeated confirmation, approval required, timeout retry, pending webhook, reload, outfit and NPC changes, cancellation return, complete free route. Screenshot: /tmp/gca-browser-smoke.png",
+    "PASS Chromium pointer purchase/quote isolation/recovery; mobile 390px and CSS 200% reflow; Tab/Enter free completion; global session error/retry; reduced motion. Mock rehearsal only.",
   );
 } finally {
   socket?.close();
@@ -299,5 +435,10 @@ try {
   await new Promise((r) =>
     browser.exitCode !== null ? r() : browser.once("exit", r),
   );
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  });
 }

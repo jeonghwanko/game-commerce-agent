@@ -23,9 +23,14 @@ export class GameBridge {
       entitlements,
       formal,
       canEnter: formal && !!g.seal && !!g.rumor,
-      reaction: formal
-        ? "Smart clothes. I still need the seal and the correct rumor."
-        : "Formal clothes, a seal, and the correct rumor are required.",
+      reaction:
+        [
+          !formal && "formal clothes (free loan available)",
+          !g.seal && "the invitation seal",
+          !g.rumor && "the password",
+        ]
+          .filter(Boolean)
+          .join(", ") || "All checks complete.",
     };
   }
   quest(user, quest) {

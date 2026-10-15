@@ -77,7 +77,9 @@ const corpus = Object.entries(groups).flatMap(([category, goals]) =>
       category === "owned"
         ? "use_owned"
         : category === "free"
-          ? "use_free"
+          ? i % 2 === 0
+            ? "use_free"
+            : "no_purchase"
           : ["ambiguous", "unsuitable"].includes(category)
             ? "no_purchase"
             : "consider_purchase",
@@ -187,8 +189,8 @@ test("real adapter contract uses strict eligible SKU schema, no tools, timeout a
       assert.equal(body.tools, undefined);
       assert.equal(body.response_format.json_schema.strict, true);
       assert.deepEqual(
-        body.response_format.json_schema.schema.properties.skus.items.enum,
-        ["rosalyn-gala"],
+        body.response_format.json_schema.schema.properties.goals.items.enum,
+        ["story", "collection"],
       );
       assert.equal(body.max_completion_tokens, 250);
       return new Promise((resolve, reject) => {

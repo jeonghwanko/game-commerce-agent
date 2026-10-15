@@ -1,28 +1,22 @@
-# English player-led demo — 2 minutes 45 seconds
+# Player-led recording route — 2:45
 
-This is a recording plan, not recorded evidence. Show a real Sandbox + AI run only after the approved runbook passes. Keep explicit mock badges visible and say “offline simulation” when using current local evidence. Never splice simulated success into a claimed live payment.
+Prepared script only; no final video or actual-provider evidence has been recorded. Keep the entire run in one declared mode. The current browser artifacts are **MOCK REHEARSAL**, with that badge visible throughout. Do not splice mock recovery into a claimed live payment.
 
-**0:00–0:25 — A player's problem**
-“I want to enter the evening gathering. The guard needs formal clothes, an invitation seal and a rumor. I don't want a payment chatbot deciding what I buy. I want help finding my next step.”
-Walk to the shop in the original courtyard and talk to Rosalyn.
+| Time      | Player action / framing                                                                                                                     | English narration                                                                                                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0:00–0:20 | Courtyard → Walk to shop → Talk to Rosalyn. Evidence panel stays closed.                                                                    | “I want to enter the evening gathering, with three dollars to spare. I need help choosing my next step.”                                                                                   |
+| 0:20–0:45 | Ask “enter the evening gathering”. Show free loan and missing quest plan. Then ask “collect the violet coat with gold embroidery”. Preview. | “The story is free. Borrowed clothes pass the dress check; this gold-embroidered coat is an optional collectible. The agent interprets my goal; the server checks my wardrobe and budget.” |
+| 0:45–1:15 | Show item, USD 1.99, expiry and explicit confirm. Follow the mode-specific payment step below.                                              | “I choose the collectible. This exact product, amount and currency are my confirmation. AI cannot approve or grant anything.”                                                              |
+| 1:15–1:50 | Wear Gala; courier → accept seal; archivist → remember password; guard → enter gathering.                                                   | “The outfit changes my character. It does not buy the seal or password. I earn both for free, then enter. A player in borrowed clothes can finish the same story.”                         |
+| 1:50–2:15 | **One recovery case only:** reload a pending purchase; use Refresh saved status after verified delivery.                                    | “A pending payment is not ownership. Reload restores the same order. Once payment and notification are verified, the wardrobe contains one entitlement.”                                   |
+| 2:15–2:45 | Briefly open evidence panel; show server boundary diagram and honest evidence checklist.                                                    | “Reusable commerce, a host-verified identity, OneSub’s MIT entitlement core and a pseudonymous outbox. We keep collection optional and story progress free.”                               |
 
-**0:25–0:50 — A choice, not a sales funnel**
-“With a three-dollar budget, I can review the gold-embroidered coat, borrow plain formal clothes for free, or use an outfit I already own. The server checks my wardrobe and quests. AI can select an eligible SKU; it cannot create a price, payment or entitlement.”
-Show the server action plan and two visibly different outfit previews. Briefly show the no-purchase plan for an already-owned outfit.
+## Mock rehearsal track
 
-**0:50–1:20 — Exact consent and payment**
-“I choose this collectible look. The quote fixes the outfit, USD 1.99 and expiry. This is my confirmation, followed by my Sandbox buyer approval.”
-Show exact purchase confirmation, then the approved Sandbox payment flow. Hide credentials and buyer personal details. If only mock is available, identify the simulation clearly.
+Use “Simulate buyer approval + verified webhook (MOCK)” and say “This is an offline rehearsal; neither PayPal nor an AI model is being called.” The browser test separately injects a lost response and delayed notification to verify recovery. Do not claim those injected conditions occurred at PayPal. Recovery can be recorded as a clearly labeled rehearsal segment; no other failure/cancellation/refund montage is needed in the 2:45 narrative.
 
-**1:20–1:50 — Dress changes; story rules stay**
-“The verified outfit appears in my wardrobe and on my character. The guard recognizes the formal look, but I still need the seal and rumor. I collect both for free, talk to the guard, and walk through. A player in the borrowed outfit can finish the same story.”
-Show the character, NPC dialogue and gate crossing.
+## Actual-provider proof track — blocked pending configuration confirmation
 
-**1:50–2:20 — Honest recovery**
-“A lost response is not a new charge. Retrying reads the same order. While the signed webhook is missing, the UI says pending and grants nothing. When verification arrives, one entitlement is restored, even after reload. Cancelling and returning via the old approval link grants nothing.”
-Use the clearly labeled fault-injection local sequence if a real provider failure cannot be shown safely.
+Use the approved Sandbox seller/buyer, configured callback and host-authenticated real AI entrypoint. Show actual goal interpretation and buyer approval; redact buyer identifiers and secrets. Retain a sanitized evidence record tying one local order to actual capture and verified provider notification. For recovery, close/reopen the page while its actual event is pending and refresh after delivery; never fabricate a signed event or force a grant. If the provider is too fast, demonstrate reload of the completed order instead and say so. End by distinguishing the independent original scene from the still-unintegrated private game.
 
-**2:20–2:45 — Why this can be reused**
-“The commerce core keeps payment authority on the server, reuses OneSub's licensed entitlement evaluator, and accepts a host-verified player identity. The folded evidence panel contains pseudonymous events, not conversations or payment details. Our next validation is the approved real provider and private-game integration, with no paid advantage required to finish the story.”
-
-No video, external tester feedback, real AI performance measurement or hackathon submission is included in this branch.
+Before filming: run `npm run test:browser`, review mobile/keyboard access, confirm provider/AI badges, keep evidence closed, prepare a fresh test identity and a recovery order, and rehearse to 2:45. Capture with the operator’s approved recorder; no publishing, external testers or submission is authorized by this script.

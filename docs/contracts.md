@@ -8,7 +8,7 @@
 
 No HTTP endpoint, `userId` query/body, identity header or development impersonation header can create a principal. `NODE_ENV=production` rejects anonymous startup. In principal mode, the anonymous session issuer and free fixture quest mutation route are unavailable; the host must retain its actual quest authority. No existing authentication database is read or modified. See the proposed integration impact document before a private-game PR.
 
-Real AI additionally requires explicit access enablement and a positive persistent global attempt budget. New sessions and process restarts cannot reset the budget in the same database. AI and webhook verification each have global concurrency caps. Keep this single-instance prototype isolated until host auth, deployment controls, retention, backups and reconciliation operations are approved.
+Real AI additionally requires explicit access enablement and a positive persistent global attempt budget. New sessions and process restarts cannot reset the budget in the same database. AI and webhook verification have shared SQLite concurrency reservations. AI lifetime costs and webhook recoverable 60-second windows are separate. Keep this single-instance prototype isolated until host auth, deployment controls, retention, backups and reconciliation operations are approved.
 
 ## HTTP interface
 
@@ -37,7 +37,7 @@ Catalog controls money, currency and effect; the model controls none of them. Qu
 
 ## Persistence and failure semantics
 
-SQLite is the single-host source of truth; no localStorage ledger exists. Unique provider order/capture IDs and `(user_id,sku)` rights prevent duplicate grants. Event, receipt and entitlement mutations run in one transaction. Provider I/O happens outside transactions. The prototype supports one application instance, with synchronous SQLite transactions; it does not promise multi-region/distributed exactly-once execution.
+SQLite is the single-host source of truth; no localStorage ledger exists. Unique provider order/capture IDs and `(user_id,sku)` rights prevent duplicate grants. Event, receipt and entitlement mutations run in one transaction. Provider I/O happens outside transactions. Budget reservations are tested across eight workers sharing one local SQLite file. Deployment support remains a single host; separate/replicated databases do not share these limits. No multi-region exactly-once claim is made.
 
 A `CREATING` retry uses the same PayPal request ID, bounded to five hours (inside the default six-hour create idempotency window). Older uncertain creates require operator reconciliation and cannot be blindly retried. `CAPTURE_PENDING` retries inspect the existing provider order first. `AWAITING_WEBHOOK` is deliberately not ownership. Verified webhook processing re-reads the provider and matches local reference, order, capture ID, final status, exact amount and currency. Unknown provider orders return retryable 503; a webhook can arrive before local create commits. Signature failure returns 401. Irrelevant event types cannot grant.
 
@@ -64,3 +64,11 @@ Allowed rows are exactly `{id, user_id, order_id, name, at}` plus an internal de
 `verified_webhooks` retains only signed, bounded event references, not raw provider payloads. A refund resource ID is never treated as a capture ID. Only a known Sandbox `rel=up` origin/path can yield a capture ID, and the adapter calls fixed API paths to verify refund → capture → order and the expected payee. No supplied URL is fetched. An early signed refund hold can block subsequent completion even before local order binding; known rights are held even if follow-up provider reads time out. Completed capture validation and grant/receipt/outbox writes are atomic in SQLite; external provider effects are reconciled separately.
 
 Payment-provider mode is persisted in `environment`. Opening a database in another mode fails. Legacy databases are checked for incompatible order providers before marking; do not bypass this guard by deleting its marker.
+
+## Intent interpretation and plan authority
+
+The read-only interpreter returns exactly `{goals, style, avoidStyles, spending, clarify}`. Goals distinguish story entry from optional collection and can coexist. It has no action, SKU, money, principal or entitlement fields. Strict response schema, bounded output, no tools, refusal/truncation checks and runtime validation apply. The server planner then reads verified rights and host quest state, filters canonical products by budget/style/held rights, and creates only allowed actions. Loaned formal clothes solve story entry but do not suppress an explicit collectible purchase. State changes invalidate rendered plans; new recommendations require current server context. The offline parser remains a limited rehearsal substitute, not a claim of multilingual model accuracy.
+
+`PAYMENT.CAPTURE.REVERSED` with `resource_type=refund` follows refund-ID → allowed capture link → fixed API correlation, just like refund-shaped REFUNDED. A capture resource remains distinct. Partial refund/reversal conservatively holds the complete cosmetic right for review. Late completion cannot undo a hold. Unknown resource types fail closed.
+
+Official [PayPal event names](https://developer.paypal.com/api/rest/webhooks/event-names/) link REVERSED to the refund operation; the [Payments v2 schema](https://github.com/paypal/paypal-rest-api-specifications/blob/main/openapi/payments_payment_v2.json) supplies refund/capture resources. The reported [WooCommerce #1614](https://github.com/woocommerce/woocommerce-paypal-payments/issues/1614) is a compatibility regression input, not a replacement for signature/API validation. Tests use synthetic IDs and Sandbox origins, with no private payer fields copied.

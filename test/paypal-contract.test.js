@@ -23,6 +23,7 @@ function fixture(t) {
     captures = [];
   const calls = [];
   const remote = {
+    now: 0,
     merchant: "MERCHANT",
     orderId,
     captureId,
@@ -108,6 +109,8 @@ function fixture(t) {
       origin: "http://localhost:3000",
       webhookBudget: new ExternalWorkBudget(s, {
         name: "webhook-test",
+        windowMs: 60000,
+        now: () => remote.now,
         limit: 20,
         concurrency: 2,
       }),
@@ -325,4 +328,84 @@ test("capture detail mismatches and partial capture cannot grant", async (t) => 
     await assert.rejects(f.c.webhook(headers, f.completion()));
   }
   assert.equal(f.s.get("SELECT count(*) n FROM entitlements").n, 0);
+});
+
+for (const early of [false, true])
+  test(`refund-shaped REVERSED, early=${early}`, async (t) => {
+    const f = fixture(t);
+    const o = await f.create();
+    f.complete();
+    if (!early) await f.c.webhook(headers, f.completion());
+    await f.c.webhook(headers, {
+      ...f.refund(),
+      event_type: "PAYMENT.CAPTURE.REVERSED",
+      resource_type: "refund",
+    });
+    await f.c.webhook(headers, { ...f.completion(), id: "WH-LATE-REVERSE" });
+    assert.equal(f.c.owned("alice", o.id).status, "REVIEW");
+    assert.equal(
+      f.s.get("SELECT count(*) n FROM entitlements WHERE status='active'").n,
+      0,
+    );
+    assert.ok(f.calls.some((c) => c.url.endsWith("/refunds/REFUND123")));
+  });
+
+test("invalid signatures exhaust a recoverable window; verified completion and refund succeed after cooldown", async (t) => {
+  const f = fixture(t);
+  const o = await f.create();
+  f.complete();
+  f.remote.verify = "FAILURE";
+  for (let i = 0; i < 20; i++)
+    await assert.rejects(
+      f.c.webhook(headers, f.completion()),
+      /invalid_webhook/,
+    );
+  f.remote.verify = "SUCCESS";
+  await assert.rejects(
+    f.c.webhook(headers, f.completion()),
+    /external_budget_exhausted/,
+  );
+  f.remote.now = 60001;
+  await f.c.webhook(headers, f.completion());
+  assert.equal(f.c.owned("alice", o.id).status, "GRANTED");
+  f.remote.verify = "FAILURE";
+  for (let i = 0; i < 19; i++)
+    await assert.rejects(f.c.webhook(headers, f.refund()), /invalid_webhook/);
+  f.remote.verify = "SUCCESS";
+  await assert.rejects(
+    f.c.webhook(headers, f.refund()),
+    /external_budget_exhausted/,
+  );
+  f.remote.now = 120002;
+  await f.c.webhook(headers, f.refund());
+  assert.equal(f.c.owned("alice", o.id).status, "REVIEW");
+  assert.equal(f.s.get("SELECT status FROM entitlements").status, "held");
+});
+test("malicious refund-shaped REVERSED up URL is never fetched", async (t) => {
+  const f = fixture(t);
+  await f.create();
+  f.complete();
+  const e = {
+    ...f.refund(),
+    event_type: "PAYMENT.CAPTURE.REVERSED",
+    resource_type: "refund",
+  };
+  e.resource.links[0].href = "https://evil.invalid/v2/payments/captures/CAP123";
+  await f.c.webhook(headers, e);
+  assert.ok(f.calls.every((c) => c.url.startsWith(SANDBOX + "/")));
+});
+
+test("capture-shaped REVERSED stays distinct from refund-shaped resources", async (t) => {
+  const f = fixture(t);
+  const o = await f.create();
+  f.complete();
+  await f.c.webhook(headers, f.completion());
+  await f.c.webhook(headers, {
+    ...f.completion(),
+    id: "WH-CAPTURE-REVERSED",
+    event_type: "PAYMENT.CAPTURE.REVERSED",
+    resource_type: "capture",
+  });
+  assert.equal(f.c.owned("alice", o.id).status, "REVIEW");
+  assert.ok(!f.calls.some((c) => c.url.includes("/refunds/")));
 });

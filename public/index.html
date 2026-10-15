@@ -13,6 +13,10 @@
       <span class="brand">GCA / PLAYABLE COMMERCE</span
       ><span id="mode">Connecting…</span>
     </header>
+    <div id="global-error" role="alert" hidden>
+      <p id="error-message"></p>
+      <button id="retry-connection">Retry connection / restore progress</button>
+    </div>
     <main>
       <section class="intro wide">
         <p class="eyebrow">A SMALL ADVENTURE. YOUR CHOICE.</p>
@@ -33,6 +37,7 @@
           ><button data-walk="seal">Walk to courier</button
           ><button data-walk="rumor">Walk to archivist</button
           ><button data-walk="guard">Walk to guard</button
+          ><button data-walk="exit">Enter the gathering</button
           ><button id="interact" disabled>Walk near someone to talk</button>
         </div>
         <p class="controls">
@@ -80,10 +85,11 @@ I need formal clothes to get past the guard.</textarea
           height="140"
           aria-label="Outfit preview"
         ></canvas>
-        <div id="quote">
+        <div id="quote" tabindex="-1">
           Select an outfit to see its exact price and contents.
         </div>
         <div id="checkout"></div>
+        <div id="pending-purchase"></div>
         <p id="status" role="status" aria-live="polite"></p>
       </section>
       <section class="panel">

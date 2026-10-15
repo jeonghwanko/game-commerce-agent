@@ -1,109 +1,120 @@
-/** Authoritative goal plan. LLM output cannot create actions or change quest rules. */
-export function planGoal(goal, budgetMinor, context, catalog) {
-  const normalized = goal.toLowerCase();
-  const kind = /guard|formal|gala|경비|저택|정장/.test(normalized)
+import { validateIntent } from "./intent.js";
+/** Pure authoritative planner. Interpretation is untrusted data, never actions/prices/rights. */
+export function planGoal(input, budgetMinor, context, catalog) {
+  const intent = validateIntent(input);
+  const story = intent.goals.includes("story"),
+    collection = intent.goals.includes("collection");
+  const kind = story
     ? "guard"
-    : /travel|cloak|망토/.test(normalized)
-      ? "travel"
-      : /outfit|clothes|옷|의상/.test(normalized)
-        ? "outfit"
-        : "unsupported";
-  const goalProducts = catalog.filter((p) =>
-    kind === "guard"
-      ? p.effect === "formal"
-      : kind === "travel"
-        ? p.effect === "cosmetic"
-        : kind === "outfit",
-  );
-  const owned = goalProducts.find((p) => context.owned.includes(p.sku));
+    : collection
+      ? intent.style === "cloak"
+        ? "travel"
+        : "outfit"
+      : "unsupported";
   const actions = [];
-  let strategy;
-  if (kind === "unsupported") {
-    strategy = "no_purchase";
-    actions.push({
-      type: "no_purchase",
-      label: "No catalog item is verified to solve this goal.",
-    });
-  } else if (kind === "guard" && context.formal) {
-    strategy = "no_purchase";
-    actions.push({
-      type: "no_purchase",
-      label: "Your equipped outfit already meets the dress check.",
-    });
-  } else if (owned) {
+  const style = collection ? intent.style : "formal";
+  const matches = catalog.filter(
+    (p) =>
+      p.active &&
+      !intent.avoidStyles.includes(
+        p.effect === "formal" ? "formal" : "cloak",
+      ) &&
+      (style === "any" ||
+        (style === "formal"
+          ? p.effect === "formal"
+          : style === "cloak" && p.effect === "cosmetic")),
+  );
+  const owned = matches.find((p) => context.owned.includes(p.sku));
+  const available = matches.filter(
+    (p) =>
+      p.amount <= budgetMinor &&
+      !context.entitlements?.some((e) => e.sku === p.sku),
+  );
+  let strategy = "no_purchase",
+    reason = "unsupported";
+  if (intent.clarify || style === "unspecified") reason = "clarify";
+  else if (!intent.goals.length) reason = "unsupported";
+  else if (owned) {
     strategy = "use_owned";
+    reason = "already_owned";
     actions.push({
       type: "equip",
       sku: owned.sku,
       label: `Wear your owned ${owned.name}.`,
     });
-  } else if (kind === "guard" && context.borrowed) {
+  } else if (story && !collection && context.formal) reason = "already_ready";
+  else if (story && !collection && context.borrowed) {
     strategy = "use_free";
+    reason = "loan_available";
     actions.push({
       type: "equip",
       sku: "borrowed",
-      label: "Wear the formal clothes you already borrowed.",
+      label: "Wear your free borrowed formal clothes.",
     });
-  } else if (
-    budgetMinor === 0 ||
-    /free|no purchase|do not buy|무료|사지|구매하지/.test(normalized)
-  ) {
-    strategy = kind === "guard" ? "use_free" : "no_purchase";
-    actions.push(
-      kind === "guard"
-        ? {
-            type: "borrow",
-            label: "Borrow formal clothes for free, then equip them.",
-          }
-        : {
-            type: "no_purchase",
-            label: "Keep your current outfit; no purchase is needed.",
-          },
-    );
-  } else if (goalProducts.some((p) => p.amount <= budgetMinor)) {
+  } else if (intent.spending === "free" || budgetMinor === 0) {
+    strategy = story ? "use_free" : "no_purchase";
+    reason = "free_preference";
+  } else if (available.length) {
     strategy = "consider_purchase";
+    reason = "optional_collection";
     actions.push({
       type: "review_purchase",
       label:
-        "Optional: review a suitable outfit within your budget. Confirmation is required.",
+        "Optional collection: preview an outfit within your budget. Purchase requires your explicit confirmation.",
     });
-  } else {
-    strategy = kind === "guard" ? "use_free" : "no_purchase";
-    actions.push(
-      kind === "guard"
-        ? {
-            type: "borrow",
-            label: "Borrow formal clothes; paid options exceed your budget.",
-          }
-        : {
-            type: "no_purchase",
-            label: "No suitable outfit fits this budget.",
-          },
-    );
+  } else
+    reason = !matches.length
+      ? "no_suitable_style"
+      : matches.every((p) => context.entitlements?.some((e) => e.sku === p.sku))
+        ? "held_purchase"
+        : "budget_insufficient";
+  if (story && !context.formal) {
+    actions.push({
+      type: "borrow",
+      label:
+        "For story entry, borrow and wear formal clothes for free. Collecting a different look is optional.",
+    });
+    if (strategy === "no_purchase" && !collection && !intent.clarify)
+      strategy = "use_free";
   }
-  if (kind === "guard") {
+  if (story) {
     if (!context.seal)
       actions.push({
         type: "quest",
         quest: "seal",
-        label: "Complete the free seal quest.",
+        label: "Get the free invitation seal from the courier.",
       });
     if (!context.rumor)
       actions.push({
         type: "quest",
         quest: "rumor",
-        label: "Complete the free rumor quest.",
+        label: "Learn the free password from the archivist.",
       });
   }
+  const reasons = {
+    unsupported: "No catalog item is verified to solve this goal.",
+    clarify:
+      "Please clarify: story entry, a formal coat, or a traveler’s cloak?",
+    already_ready: "Your current clothes already meet the dress check.",
+    free_preference:
+      "Your free preference is respected. No purchase is suggested.",
+    budget_insufficient:
+      "No suitable available outfit fits this budget. Buying is optional.",
+    held_purchase:
+      "This purchase is on hold. Review its status; do not buy it again.",
+    no_suitable_style: "No catalog outfit meets these style constraints.",
+  };
+  if (reasons[reason])
+    actions.unshift({ type: "no_purchase", label: reasons[reason] });
   return {
     goal: kind,
     strategy,
+    reason,
     actions,
-    freeAlternative:
-      kind === "guard"
-        ? "Borrow formal clothes and complete the seal and rumor quests for free."
-        : "Keep your current outfit; buying is optional.",
+    freeAlternative: story
+      ? "Borrow formal clothes and complete only the missing seal and rumor quests for free."
+      : "Keep your current outfit; buying is optional.",
     eligibleSkus:
-      strategy === "consider_purchase" ? goalProducts.map((p) => p.sku) : [],
+      strategy === "consider_purchase" ? available.map((p) => p.sku) : [],
   };
 }

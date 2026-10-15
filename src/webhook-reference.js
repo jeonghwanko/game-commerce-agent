@@ -25,10 +25,31 @@ export function paypalLinkId(links, kind) {
   const id = url.pathname.slice(prefix.length);
   return /^[A-Za-z0-9-]+$/.test(id) ? id : undefined;
 }
+export function isRefundResource(event) {
+  const reversal = [
+    "PAYMENT.CAPTURE.REFUNDED",
+    "PAYMENT.CAPTURE.REVERSED",
+  ].includes(event.event_type);
+  requireThat(
+    !event.resource_type || ["refund", "capture"].includes(event.resource_type),
+    "unsupported_resource_type",
+  );
+  requireThat(
+    event.resource_type !== "refund" || reversal,
+    "invalid_event_resource",
+  );
+  return (
+    reversal &&
+    (event.resource_type === "refund" ||
+      (!event.resource_type &&
+        (event.event_type === "PAYMENT.CAPTURE.REFUNDED" ||
+          !!paypalLinkId(event.resource?.links, "capture"))))
+  );
+}
 export function eventReference(event) {
   const r = event.resource;
   const related = r?.supplementary_data?.related_ids;
-  const refund = event.event_type === "PAYMENT.CAPTURE.REFUNDED";
+  const refund = isRefundResource(event);
   const captureId =
     related?.capture_id ?? (refund ? paypalLinkId(r?.links, "capture") : r?.id);
   const providerId = related?.order_id;

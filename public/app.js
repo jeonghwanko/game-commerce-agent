@@ -1,14 +1,31 @@
 const $ = (s) => document.querySelector(s);
 let session;
 let activeOrder;
+let pendingOrder;
 let busy = false;
+let gameSnapshot;
+const names = {
+  "rosalyn-gala": "Rosalyn Gala Outfit",
+  "rosalyn-traveler": "Traveler’s Cloak",
+  borrowed: "Borrowed formal clothes · Free loan",
+};
+const statuses = {
+  APPROVAL_PENDING: "Awaiting your approval",
+  CAPTURE_PENDING: "Payment outcome being checked",
+  AWAITING_WEBHOOK: "Waiting for verified payment notification",
+  GRANTED: "Outfit added to wardrobe",
+  REVIEW: "Purchase on hold — outfit unavailable",
+  CANCELLED: "Purchase cancelled",
+  FAILED: "Payment unsuccessful",
+  CREATING: "Preparing purchase",
+};
 const scene = new AtelierScene($("#world"), (place) =>
   run(async () => {
     const actions = $("#dialogue-actions");
     actions.replaceChildren();
     if (place === "shop") {
       $("#shop-panel").hidden = false;
-      $("#purchase-panel").hidden = false;
+      $("#goal").focus();
       $("#dialogue-text").textContent =
         "Rosalyn: Let’s solve your goal. The gala coat has gold star embroidery; the traveler’s cloak has a flowing teal cape. Borrowed formal clothes pass the same dress check, for free.";
       actions.append(
@@ -17,7 +34,7 @@ const scene = new AtelierScene($("#world"), (place) =>
           await api("/api/game/equip", { sku: "borrowed" });
           await refresh();
           $("#dialogue-text").textContent =
-            "Rosalyn: A loan, freely given. You still need the seal and rumor.";
+            "Rosalyn: A free loan, separate from your owned collection. Check the gate checklist for any remaining quests.";
         }),
       );
     } else if (place === "seal" || place === "rumor") {
@@ -72,6 +89,7 @@ function button(label, action) {
 }
 async function api(path, data) {
   const r = await fetch(path, {
+    signal: AbortSignal.timeout(15000),
     method: data === undefined ? "GET" : "POST",
     headers:
       data === undefined
@@ -85,17 +103,37 @@ async function api(path, data) {
 }
 async function run(fn) {
   if (busy) return;
+  const focused = document.activeElement;
   busy = true;
-  document.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  syncControls();
   try {
     await fn();
+    $("#global-error").hidden = true;
   } catch (e) {
-    $("#status").textContent =
-      `Could not complete: ${e.message}. No entitlement is granted without verification.`;
+    $("#global-error").hidden = false;
+    $("#error-message").textContent =
+      `Could not complete: ${e.message}. Retry connection to check saved progress. A failed request does not confirm a payment.`;
+    $("#status").textContent = `Could not complete: ${e.message}`;
   } finally {
     busy = false;
-    document.querySelectorAll("button").forEach((b) => (b.disabled = false));
+    syncControls();
+    if (
+      document.activeElement === document.body &&
+      focused?.isConnected &&
+      !focused.disabled
+    )
+      focused.focus();
   }
+}
+function syncControls() {
+  document.body.classList.toggle("busy", busy);
+  document.querySelectorAll("button").forEach((b) => {
+    b.disabled =
+      busy ||
+      (b.id !== "retry-connection" && !session) ||
+      (b.id === "interact" && !scene.near) ||
+      (b.dataset.walk === "exit" && !scene.state.canEnter);
+  });
 }
 const price = (p) => `${p.currency} ${(p.amount / 100).toFixed(2)}`;
 async function refresh() {
@@ -103,14 +141,30 @@ async function refresh() {
     api("/api/game"),
     api("/api/analytics/funnel"),
   ]);
+  const snapshot = JSON.stringify(g);
+  if (gameSnapshot && gameSnapshot !== snapshot) {
+    $("#plan").replaceChildren(
+      text(
+        "p",
+        "Your game state changed. Ask Rosalyn again for an updated plan.",
+      ),
+    );
+    $("#products").replaceChildren();
+    $("#alternative").textContent =
+      "Your owned clothes and the free loan remain separate. Buying is optional.";
+  }
+  gameSnapshot = snapshot;
   scene.update(g);
   $("#wardrobe").replaceChildren();
   for (const sku of [...g.owned, ...(g.borrowed ? ["borrowed"] : [])])
     $("#wardrobe").append(
-      button(`Wear ${sku}${g.equipped === sku ? " ✓" : ""}`, async () => {
-        await api("/api/game/equip", { sku });
-        await refresh();
-      }),
+      button(
+        `Wear ${names[sku]}${g.equipped === sku ? " ✓" : ""}`,
+        async () => {
+          await api("/api/game/equip", { sku });
+          await refresh();
+        },
+      ),
     );
   $("#guard").textContent = g.canEnter
     ? "Guard: All three checks pass. Welcome inside!"
@@ -122,6 +176,19 @@ async function refresh() {
   );
 }
 async function select(p) {
+  const previous = pendingOrder;
+  pendingOrder = previous;
+  activeOrder = undefined;
+  delete $("#checkout").dataset.orderId;
+  $("#checkout").replaceChildren();
+  $("#quote").replaceChildren();
+  $("#pending-purchase").replaceChildren();
+  if (previous)
+    $("#pending-purchase").append(
+      button("Return to pending purchase", async () =>
+        showOrder(await api(`/api/commerce/orders/${previous}`)),
+      ),
+    );
   preview(p.sku);
   $("#purchase-panel").hidden = false;
   const q = await api("/api/commerce/quotes", { sku: p.sku });
@@ -147,18 +214,32 @@ async function select(p) {
   );
   $("#status").textContent =
     "Review the product, amount, and currency before confirming.";
+  $("#quote").focus();
 }
 async function showOrder(o) {
   $("#purchase-panel").hidden = false;
+  $("#pending-purchase").replaceChildren();
   preview(o.sku);
   $("#quote").replaceChildren(
-    text("h3", o.sku),
+    text("h3", names[o.sku]),
     text("p", price(o), "price"),
-    text("p", `Your confirmed outfit purchase · ${o.status}`),
+    text(
+      "p",
+      `Your confirmed outfit purchase · ${statuses[o.status] ?? "Checking purchase"}`,
+    ),
   );
   activeOrder = o.id;
+  pendingOrder = [
+    "APPROVAL_PENDING",
+    "CAPTURE_PENDING",
+    "AWAITING_WEBHOOK",
+  ].includes(o.status)
+    ? o.id
+    : undefined;
+  $("#checkout").dataset.orderId = o.id;
   $("#checkout").replaceChildren();
-  $("#status").textContent = `Order ${o.status}`;
+  $("#status").textContent =
+    `Order ${statuses[o.status] ?? "Checking purchase"}`;
   if (o.status === "APPROVAL_PENDING") {
     if (session.paymentMode === "mock")
       $("#checkout").append(
@@ -175,6 +256,9 @@ async function showOrder(o) {
       );
     else {
       const a = text("a", "Continue to PayPal Sandbox", "action");
+      a.onclick = (e) => {
+        if (busy) e.preventDefault();
+      };
       a.href =
         o.approvalUrl ??
         `https://www.sandbox.paypal.com/checkoutnow?token=${encodeURIComponent(o.provider_id)}`;
@@ -192,10 +276,10 @@ async function showOrder(o) {
     )
   )
     $("#checkout").append(
-      button("Verify / retry server capture", async () => {
+      button("Retry payment check", async () => {
         await showOrder(await api(`/api/commerce/orders/${o.id}/capture`, {}));
       }),
-      button("Refresh verified status", async () => {
+      button("Refresh saved status", async () => {
         await showOrder(await api(`/api/commerce/orders/${o.id}`));
       }),
     );
@@ -207,6 +291,7 @@ async function showOrder(o) {
         ? "Capture checked. Waiting for a verified simulated webhook (MOCK); no outfit granted yet."
         : "Capture checked. Waiting for a verified PayPal webhook; no outfit granted yet.";
   await refresh();
+  $("#quote").focus();
 }
 $("#recommend").onsubmit = (e) => {
   e.preventDefault();
@@ -232,10 +317,7 @@ $("#recommend").onsubmit = (e) => {
     }
     if (!result.products.length)
       $("#products").append(
-        text(
-          "p",
-          "No matching paid outfit within your budget. The free route is available.",
-        ),
+        text("p", "No purchase suggested for this plan. See the reason above."),
       );
     $("#alternative").textContent = result.freeAlternative;
     await refresh();
@@ -249,14 +331,15 @@ document.querySelectorAll("[data-quest]").forEach(
         await refresh();
       })),
 );
-run(async () => {
+async function boot() {
   session = await api("/api/session");
+  $("#global-error").hidden = true;
   $("#ai-notice").textContent =
     session.aiMode === "openai"
       ? "Your goal and minimal game context are sent to OpenAI for this recommendation."
       : "Offline demo recommendations. No AI API is called.";
   $("#mode").textContent =
-    `${session.paymentMode.toUpperCase()} · AI: ${session.aiMode.toUpperCase()}`;
+    `${session.paymentMode.toUpperCase()} · AI: ${session.aiMode.toUpperCase()}${session.paymentMode === "mock" ? " · REHEARSAL" : ""}`;
   await refresh();
   const params = new URLSearchParams(location.search);
   const id = params.get("order");
@@ -276,4 +359,6 @@ run(async () => {
     if (pending)
       await showOrder(await api(`/api/commerce/orders/${pending.id}`));
   }
-});
+}
+$("#retry-connection").onclick = () => run(boot);
+run(boot);

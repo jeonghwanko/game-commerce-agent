@@ -37,6 +37,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS game (user_id TEXT PRIMARY KEY, equipped TEXT, seal INTEGER NOT NULL DEFAULT 0, rumor INTEGER NOT NULL DEFAULT 0, borrowed INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS environment (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS external_budgets (name TEXT PRIMARY KEY, used INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS external_budget_policy (name TEXT PRIMARY KEY, ceiling INTEGER NOT NULL, concurrency INTEGER NOT NULL, window_ms INTEGER NOT NULL, started INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS external_work (id TEXT PRIMARY KEY, name TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS capture_operations (order_id TEXT PRIMARY KEY REFERENCES orders(id), token TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS principals (identity_hash TEXT PRIMARY KEY, user_id TEXT UNIQUE NOT NULL);
       CREATE TABLE IF NOT EXISTS verified_webhooks (provider TEXT NOT NULL, id TEXT NOT NULL, type TEXT NOT NULL, provider_id TEXT, capture_id TEXT, PRIMARY KEY(provider,id));`);

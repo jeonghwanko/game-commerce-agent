@@ -14,17 +14,19 @@ class AtelierScene {
       shop: { x: 180, y: 250, label: "Rosalyn · Shop" },
       seal: { x: 420, y: 340, label: "Courier · Seal" },
       rumor: { x: 570, y: 190, label: "Archivist · Rumor" },
+      exit: { x: 900, y: 235, label: "Gathering" },
       guard: { x: 760, y: 235, label: "Gatekeeper" },
     };
     canvas.onclick = (e) => {
+      canvas.focus();
       const r = canvas.getBoundingClientRect();
       this.target = {
         x: ((e.clientX - r.left) * 1000) / r.width,
         y: ((e.clientY - r.top) * 450) / r.height,
       };
     };
-    window.addEventListener("keydown", (e) => {
-      if (/INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    canvas.addEventListener("keydown", (e) => {
+      if (document.activeElement !== canvas) return;
       if (
         [
           "ArrowUp",
@@ -45,19 +47,28 @@ class AtelierScene {
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.key));
     window.addEventListener("blur", () => this.keys.clear());
+    canvas.addEventListener("blur", () => this.keys.clear());
+    this.visible = true;
+    new IntersectionObserver(([entry]) => {
+      this.visible = entry.isIntersecting;
+    }).observe(canvas);
+    this.reduced = matchMedia("(prefers-reduced-motion: reduce)");
     let last = performance.now();
     const frame = (now) => {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
-      this.move(dt);
-      this.draw(now);
+      if (!document.hidden) {
+        this.move(dt);
+        if (this.visible) this.draw(this.reduced.matches ? 0 : now);
+      }
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
   }
   walkTo(place) {
     const p = this.places[place];
-    if (p) this.target = { x: p.x, y: p.y };
+    if (p && (place !== "exit" || this.state.canEnter))
+      this.target = { x: p.x, y: p.y };
   }
   update(state) {
     this.state = state;
@@ -80,7 +91,7 @@ class AtelierScene {
     dx = this.target.x - this.player.x;
     dy = this.target.y - this.player.y;
     const distance = Math.hypot(dx, dy),
-      step = Math.min(distance, dt * 270);
+      step = this.reduced.matches ? distance : Math.min(distance, dt * 270);
     if (distance > 2) {
       this.player.x += (dx / distance) * step;
       this.player.y += (dy / distance) * step;
@@ -93,6 +104,7 @@ class AtelierScene {
     const near =
       Object.keys(this.places).find(
         (k) =>
+          k !== "exit" &&
           Math.hypot(
             this.places[k].x - this.player.x,
             this.places[k].y - this.player.y,
@@ -101,7 +113,11 @@ class AtelierScene {
     if (near !== this.near) {
       this.near = near;
       const b = document.querySelector("#interact");
-      b.disabled = !near;
+      b.disabled =
+        !near ||
+        typeof session === "undefined" ||
+        !session ||
+        (typeof busy !== "undefined" && busy);
       b.textContent = near
         ? `Talk to ${this.places[near].label.split(" · ")[0]}`
         : "Walk near someone to talk";
@@ -166,6 +182,7 @@ class AtelierScene {
       c.fillText("WELCOME", 910, 210);
     }
     for (const [key, p] of Object.entries(this.places)) {
+      if (key === "exit") continue;
       const npcY = p.y - 38;
       if (key === "shop")
         AtelierScene.avatar(c, p.x, npcY, "rosalyn-traveler", 0.9);

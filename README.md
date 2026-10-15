@@ -33,6 +33,7 @@ The server listens on loopback only. This is an isolated Sandbox prototype, not 
 npm run check          # Syntax checks and unit/HTTP/adapter tests; no external API calls
 npm run format:check
 npm run test:browser   # Installed Chromium required; actual UI interactions, offline mock
+node scripts/evaluate-ai.js # Zero-network cost/evaluation preflight; --live requires prepared configuration
 npm run funnel        # Local operator aggregate; no raw dialogues or payment data
 ```
 
@@ -44,23 +45,24 @@ Tests cover explicit confirmation, quote expiry, unknown SKU, owner/amount/curre
 
 See [Sandbox runbook](docs/sandbox-runbook.md). Real calls require separately configured, approved credentials:
 
-| Variable                                   | Purpose                                                                                |
-| ------------------------------------------ | -------------------------------------------------------------------------------------- |
-| `PAYMENT_PROVIDER=paypal-sandbox`          | Explicit real Sandbox adapter selection                                                |
-| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Existing Sandbox application credentials, server only                                  |
-| `PAYPAL_WEBHOOK_ID`                        | Existing Sandbox webhook registration for this application                             |
-| `PAYPAL_MERCHANT_ID`                       | Expected Sandbox seller merchant ID; required payee validation                         |
-| `PAYPAL_BASE_URL`                          | Must equal `https://api-m.sandbox.paypal.com`; live/alternate URLs are always rejected |
-| `PUBLIC_ORIGIN`                            | Exact browser origin and PayPal return origin                                          |
-| `AI_PROVIDER=openai`                       | Explicit real AI selection; can incur API costs                                        |
-| `OPENAI_API_KEY`, `OPENAI_MODEL`           | Approved key and model supporting strict Chat Completions JSON Schema output           |
-| `DATABASE_PATH`                            | Persistent SQLite location; default `./data/commerce.sqlite`                           |
+| Variable                                   | Purpose                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `PAYMENT_PROVIDER=paypal-sandbox`          | Explicit real Sandbox adapter selection                                                     |
+| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Existing Sandbox application credentials, server only                                       |
+| `PAYPAL_OAUTH_BASIC_AUTH_HEADER`           | Alternative full Authorization header placeholder; mutually exclusive with client ID/secret |
+| `PAYPAL_WEBHOOK_ID`                        | Existing Sandbox webhook registration for this application                                  |
+| `PAYPAL_MERCHANT_ID`                       | Expected Sandbox seller merchant ID; required payee validation                              |
+| `PAYPAL_BASE_URL`                          | Must equal `https://api-m.sandbox.paypal.com`; live/alternate URLs are always rejected      |
+| `PUBLIC_ORIGIN`                            | Exact browser origin and PayPal return origin                                               |
+| `AI_PROVIDER=openai`                       | Explicit real AI selection; can incur API costs                                             |
+| `OPENAI_API_KEY`, `OPENAI_MODEL`           | Approved key; cost guard currently pins `gpt-4.1-mini-2025-04-14` (availability untested)   |
+| `DATABASE_PATH`                            | Persistent SQLite location; default `./data/commerce.sqlite`                                |
 
-Real AI additionally requires `AUTH_MODE=principal` with an injected host verifier, `AI_ACCESS_ENABLED=true` and a positive `AI_TOTAL_CALL_LIMIT`. Defaults deny real AI access. Total attempts persist across sessions/restarts; concurrency is capped at two. Webhook verification has a separate persistent `WEBHOOK_TOTAL_VERIFY_LIMIT` (default 100) and concurrency cap. Exhaustion fails closed; limits are not an automatic billing authorization.
+Real AI additionally requires `AUTH_MODE=principal` with an injected host verifier, `AI_ACCESS_ENABLED=true` and a positive `AI_TOTAL_CALL_LIMIT`. Defaults deny real AI access. AI attempts persist across sessions/restarts. A second, shared $5 reservation guard limits real AI transport to 100 attempts at $0.05 reserved each, one concurrent request, a pinned model and bounded input/output. Webhook verification uses a separate durable 60-second window (default 100 attempts, two concurrent requests). Exhaustion returns 429 without skipping signature verification; the next window permits retry. SQLite reservations also enforce these caps across workers sharing the same local database. See operator recovery and support limits in the runbook.
 
 No credentials were created or configured during initial implementation. Real PayPal Sandbox E2E, signed provider webhook delivery and real AI execution remain **unverified**. The app never silently falls back from a misconfigured real provider to mock. `NODE_ENV` cannot enable live payments.
 
-In real AI mode, the goal text, filtered server catalog and minimal game context are sent to the configured AI provider. Goal text is not persisted in the ledger, analytics or outbox. A server-owned goal planner chooses safe actions; the model only chooses eligible SKU strings using strict schema and no tools; the server validates every result and supplies the displayed names, prices, descriptions and gameplay effects. There are no payment tools available to the model.
+In real AI mode, the goal text, server catalog descriptions and minimal game context are sent to the configured AI provider. Goal text is not persisted in the ledger, analytics or outbox. The model interprets story versus collection goals, style exclusions, free preference and ambiguity through a strict read-only intent schema. A separate pure server planner validates that interpretation against current rights, quests and budget and supplies canonical products and allowed actions. Interpretation cannot change prices, rights or quest state. The offline parser is limited rehearsal behavior, not measured AI quality. There are no payment tools available to the model.
 
 ## Architecture and trust
 
