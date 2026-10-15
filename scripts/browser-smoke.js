@@ -6,12 +6,23 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import { Store } from "../src/store.js";
 import { createApp } from "../src/server.js";
+import { SandboxDemoHost } from "../src/demo-host.js";
 import { MockProvider } from "../src/providers/mock.js";
 const dir = await mkdtemp(join(tmpdir(), "gca-browser-"));
 const store = new Store();
 const port = Number(process.env.BROWSER_TEST_PORT ?? 3137);
 const origin = `http://127.0.0.1:${port}`;
 const provider = new MockProvider(store);
+const originalCreate = provider.create.bind(provider);
+let failAfterCreate = true;
+provider.create = async (...args) => {
+  const result = await originalCreate(...args);
+  if (failAfterCreate) {
+    failAfterCreate = false;
+    throw new Error("simulated lost create response");
+  }
+  return result;
+};
 const originalCapture = provider.capture.bind(provider);
 let failAfterCapture = true;
 provider.capture = async (...args) => {
@@ -102,7 +113,7 @@ try {
   });
   await call(
     "Emulation.setDeviceMetricsOverride",
-    { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false },
+    { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
     sessionId,
   );
   const screenshot = async (name) => {
@@ -132,14 +143,14 @@ try {
     for (let i = 0; i < 100; i++) {
       if (
         await evaluate(
-          `(${expression}) && typeof busy !== 'undefined' && !busy`,
+          `document.readyState === 'complete' && typeof busy !== 'undefined' && !busy && (${expression})`,
         )
       )
         return;
       await new Promise((r) => setTimeout(r, 50));
     }
     throw new Error(
-      `UI timeout: ${expression}; ${JSON.stringify(await evaluate("({near:scene.near,target:scene.target,player:scene.player,focus:document.activeElement?.outerHTML})"))}`,
+      `UI timeout: ${expression}; ${JSON.stringify(await evaluate("({near:scene.near,target:scene.target,player:scene.player,focus:document.activeElement?.tagName})"))}`,
     );
   };
   const click = async (label) => {
@@ -158,15 +169,70 @@ try {
       sessionId,
     );
   };
-  const typeGoal = async (text, budget) => {
-    await evaluate(
-      "document.querySelector('#goal').focus(); document.querySelector('#goal').select()",
+  const typeInput = async (selector, text) => {
+    const point = await evaluate(
+      `(()=>{const b=document.querySelector(${JSON.stringify(selector)});b.scrollIntoView({block:'center'});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+    );
+    for (const type of ["mousePressed", "mouseReleased"])
+      await call(
+        "Input.dispatchMouseEvent",
+        { type, button: "left", clickCount: 1, ...point },
+        sessionId,
+      );
+    await call(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyDown",
+        key: "a",
+        code: "KeyA",
+        windowsVirtualKeyCode: 65,
+        modifiers: 2,
+      },
+      sessionId,
+    );
+    await call(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyUp",
+        key: "a",
+        code: "KeyA",
+        windowsVirtualKeyCode: 65,
+        modifiers: 2,
+      },
+      sessionId,
     );
     await call("Input.insertText", { text }, sessionId);
-    await evaluate(
-      "document.querySelector('#budget').focus(); document.querySelector('#budget').select()",
+  };
+  const typeGoal = async (text, budget) => {
+    await typeInput("#goal", text);
+    await typeInput("#budget", budget);
+  };
+  const reflow = async (stage) => {
+    await evaluate("document.documentElement.style.zoom='2'");
+    assert.ok(
+      await evaluate("document.documentElement.scrollWidth<=innerWidth"),
+      stage + " page overflow",
     );
-    await call("Input.insertText", { text: budget }, sessionId);
+    const overflow = await evaluate(
+      `Array.from(document.querySelectorAll('button,input,textarea,a.action')).filter(b=>b.getClientRects().length).filter(b=>{const r=b.getBoundingClientRect();return r.left < -1 || r.right>innerWidth+1;}).map(b=>b.textContent||b.id)`,
+    );
+    assert.deepEqual(overflow, [], stage + " control overflow");
+    await screenshot("mobile-200-" + stage);
+  };
+  const desktopShot = async (name) => {
+    await evaluate("document.documentElement.style.zoom='1'");
+    await call(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false },
+      sessionId,
+    );
+    await screenshot(name);
+    await call(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
+      sessionId,
+    );
+    await evaluate("document.documentElement.style.zoom='2'");
   };
   await call("Page.navigate", { url: origin }, sessionId);
   await wait("!document.querySelector('#global-error').hidden");
@@ -174,11 +240,14 @@ try {
     await evaluate("document.querySelector('[data-walk]').disabled"),
     true,
   );
+  await reflow("session-error");
   await click("Retry connection");
   await wait("document.querySelector('#mode')?.textContent.includes('MOCK')");
   await click("Walk to shop");
   await wait("scene.near === 'shop'");
   await click("Talk to Rosalyn");
+  await reflow("open-shop-form");
+  await typeGoal("enter the evening gathering", "3.00");
   await click("Recommend outfits");
   await wait("document.querySelectorAll('.product').length===1");
   await click("Review purchase");
@@ -186,13 +255,33 @@ try {
     "document.querySelector('#quote').textContent.includes('I confirm USD 1.99')",
   );
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
-  await screenshot("mock-preview");
+  await reflow("quote");
+  await desktopShot("mock-preview");
   await click("I confirm");
+  await wait(
+    "document.querySelector('#status').textContent.includes('operation_failed')",
+  );
+  assert.equal(
+    store.get("SELECT status FROM orders LIMIT 1").status,
+    "CREATING",
+  );
+  await reflow("create-error");
+  await call("Page.reload", {}, sessionId);
+  await wait(
+    "document.querySelector('#checkout').textContent.includes('Resume confirmed purchase')",
+  );
+  await reflow("creating-recovery");
+  await click("Resume confirmed purchase");
+
   await wait(
     "document.querySelector('#checkout').textContent.includes('Simulate buyer')",
   );
   assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 1);
+  await reflow("approval-pending");
+  await click("Walk to shop");
+  await wait("scene.near === 'shop'");
+  await click("Talk to Rosalyn");
   // Regression: selecting another quote must detach all previous payment controls.
   await typeGoal("travel cloak", "1.00");
   await click("Recommend outfits");
@@ -234,7 +323,14 @@ try {
   await wait(
     "document.querySelector('#status')?.textContent.includes('Waiting for a verified')",
   );
-  await screenshot("mock-pending");
+  await reflow("webhook-pending");
+  await desktopShot("mock-pending");
+  await evaluate("document.documentElement.style.zoom='1'");
+  await call(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
   const pendingOrder = store.get("SELECT * FROM orders LIMIT 1");
   commerce.settle(
     pendingOrder.id,
@@ -391,10 +487,10 @@ try {
     "200% reflow overflow",
   );
   await screenshot("mobile-200-percent");
-  await evaluate("document.documentElement.style.zoom='1'");
   await tabActivate("Walk to shop");
   await wait("scene.near === 'shop'");
   await tabActivate("Talk to Rosalyn");
+  await reflow("keyboard-open-shop");
   await tabActivate("Recommend outfits");
   await wait("document.querySelectorAll('.product').length===1");
   await tabActivate("Borrow formal clothes");
@@ -424,8 +520,70 @@ try {
   await tabActivate("Enter the gathering");
   await wait("scene.arrived === true");
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 2);
+  // Synthetic authenticated independent host: UI obtains server dialogue challenges.
+  // No real AI, provider, deployment, or private identity system is involved.
+  const demoStore = new Store();
+  const demoOrigin = `http://127.0.0.1:${port + 10}`;
+  const demoPassword = "synthetic-browser-test-password";
+  const demoHost = new SandboxDemoHost({
+    store: demoStore,
+    origin: demoOrigin,
+    enabled: true,
+    user: "browser-player",
+    password: demoPassword,
+  });
+  const demo = createApp({
+    store: demoStore,
+    origin: demoOrigin,
+    demoHost,
+    authMode: "principal",
+    identity: demoHost.identity,
+  });
+  await new Promise((r) => demo.server.listen(port + 10, "127.0.0.1", r));
+  try {
+    await call("Network.enable", {}, sessionId);
+    await call(
+      "Network.setExtraHTTPHeaders",
+      {
+        headers: {
+          Authorization:
+            "Basic " +
+            Buffer.from("browser-player:" + demoPassword).toString("base64"),
+        },
+      },
+      sessionId,
+    );
+    await call("Page.navigate", { url: demoOrigin }, sessionId);
+    await wait("session?.gameHost==='independent-sandbox-demo'");
+    await evaluate("document.documentElement.style.zoom='2'");
+    await tabActivate("Walk to shop");
+    await wait("scene.near==='shop'");
+    await tabActivate("Talk to Rosalyn");
+    await tabActivate("Borrow formal clothes");
+    for (const [walk, near, talk, accept] of [
+      ["Walk to courier", "seal", "Talk to Courier", "Accept the seal"],
+      ["Walk to archivist", "rumor", "Talk to Archivist", "Remember the rumor"],
+    ]) {
+      await tabActivate(walk);
+      await wait(`scene.near==='${near}'`);
+      await tabActivate(talk);
+      await tabActivate(accept);
+    }
+    await tabActivate("Walk to guard");
+    await wait("scene.near==='guard'");
+    await tabActivate("Talk to Gatekeeper");
+    await tabActivate("Enter the gathering");
+    await wait("scene.arrived===true");
+    assert.equal(demoStore.get("SELECT count(*) n FROM orders").n, 0);
+    assert.equal(demoStore.get("SELECT count(*) n FROM entitlements").n, 0);
+    assert.equal(demoStore.get("SELECT count(*) n FROM principals").n, 1);
+    assert.equal(demoStore.get("SELECT count(*) n FROM demo_challenges").n, 0);
+  } finally {
+    await new Promise((r) => demo.server.close(r));
+    demoStore.close();
+  }
   console.log(
-    "PASS Chromium pointer purchase/quote isolation/recovery; mobile 390px and CSS 200% reflow; Tab/Enter free completion; global session error/retry; reduced motion. Mock rehearsal only.",
+    "PASS Chromium pointer purchase/quote isolation/recovery; mobile 390px and CSS 200% reflow; Tab/Enter free completion; global session error/retry; reduced motion; authenticated independent demo free route. Mock rehearsal only.",
   );
 } finally {
   socket?.close();

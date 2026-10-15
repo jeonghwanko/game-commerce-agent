@@ -2,14 +2,18 @@
 import { Store } from "../src/store.js";
 import { Recommender } from "../src/recommend.js";
 import { AI_MODEL, AI_COST_POLICY, costLimitedFetch } from "../src/ai-cost.js";
-import { intentCases } from "../fixtures/intent-evaluation.js";
-import { planGoal } from "../src/planner.js";
+import {
+  intentCases,
+  evaluationComposition,
+} from "../fixtures/intent-evaluation.js";
+import { scoreIntent } from "../fixtures/score-intent.js";
 import { catalog } from "../src/catalog.js";
 const live = process.argv.includes("--live");
 console.log(
   JSON.stringify({
     mode: live ? "live" : "dry-run",
     cases: intentCases.length,
+    composition: evaluationComposition,
     model: AI_MODEL,
     policy: AI_COST_POLICY,
     modelEvaluationPerformed: false,
@@ -34,39 +38,42 @@ if (live) {
   let correct = 0,
     violations = 0,
     failures = 0;
+  const bySplit = {
+    regression: { cases: 0, correct: 0, failures: 0 },
+    holdout: { cases: 0, correct: 0, failures: 0 },
+  };
   try {
     for (const c of intentCases) {
+      bySplit[c.split].cases++;
       try {
         const result = await r.recommend(c, c.context);
-        const expected = planGoal(
-          c.expectedIntent,
-          c.budgetMinor,
-          c.context,
-          catalog,
-        );
-        const match =
-          result.plan.strategy === expected.strategy &&
-          JSON.stringify(result.products.map((p) => p.sku)) ===
-            JSON.stringify(expected.eligibleSkus);
+        const { match, errors } = scoreIntent(c, result);
         correct += Number(match);
+        bySplit[c.split].correct += Number(match);
         violations += Number(
-          result.products.some(
-            (p) =>
-              !catalog.some((x) => JSON.stringify(x) === JSON.stringify(p)) ||
-              p.amount > c.budgetMinor ||
-              c.context.owned.includes(p.sku),
-          ),
+          errors.some((e) =>
+            ["commerce_invariant", "ownership", "forbidden_style"].includes(e),
+          ) ||
+            result.products.some(
+              (p) =>
+                !catalog.some((x) => JSON.stringify(x) === JSON.stringify(p)) ||
+                p.amount > c.budgetMinor ||
+                c.context.owned.includes(p.sku),
+            ),
         );
         console.log(
           JSON.stringify({
             category: c.category,
             state: c.state,
             match,
+            errors,
+            split: c.split,
             strategy: result.plan.strategy,
           }),
         );
       } catch {
         failures++;
+        bySplit[c.split].failures++;
         console.log(
           JSON.stringify({
             category: c.category,
@@ -81,6 +88,7 @@ if (live) {
         modelEvaluationPerformed: true,
         cases: intentCases.length,
         correct,
+        bySplit,
         violations,
         failures,
         reservedAttempts: store.get(

@@ -36,6 +36,7 @@ export function createApp({
   provider,
   recommender,
   identity,
+  demoHost,
   aiAccessEnabled = process.env.AI_ACCESS_ENABLED === "true",
   aiCallLimit = Number(process.env.AI_TOTAL_CALL_LIMIT ?? 0),
   authMode = process.env.AUTH_MODE ?? "anonymous-demo",
@@ -53,6 +54,28 @@ export function createApp({
     process.env.NODE_ENV !== "production" || authMode === "principal",
     "production_requires_principal",
   );
+  requireThat(
+    !demoHost ||
+      (authMode === "principal" &&
+        identity === demoHost.identity &&
+        demoHost.name === "independent-sandbox-demo" &&
+        process.env.NODE_ENV !== "production"),
+    "invalid_demo_host",
+  );
+  const hostName = demoHost?.name ?? "fixture";
+  store.transaction(() => {
+    const existing = store.get(
+      "SELECT value FROM environment WHERE key='game_host'",
+    );
+    requireThat(
+      !existing || existing.value === hostName,
+      "database_game_host_mismatch",
+    );
+    store.run(
+      "INSERT OR IGNORE INTO environment VALUES('game_host',?)",
+      hostName,
+    );
+  });
   const mode = process.env.PAYMENT_PROVIDER ?? "mock";
   requireThat(
     ["mock", "paypal-sandbox"].includes(mode),
@@ -179,6 +202,7 @@ export function createApp({
           paymentMode: provider.name,
           aiMode: recommender.mode,
           authMode,
+          gameHost: hostName,
         });
       }
       requireThat(session, "session_required", 401);
@@ -234,7 +258,7 @@ export function createApp({
           ),
         );
       const match = path.match(
-        /^\/api\/commerce\/orders\/([a-f0-9-]{36})(?:\/(capture|cancel|mock-approve))?$/,
+        /^\/api\/commerce\/orders\/([a-f0-9-]{36})(?:\/(capture|cancel|resume|mock-approve))?$/,
       );
       if (match && req.method === "GET" && !match[2])
         return send(200, commerce.owned(user, match[1]));
@@ -265,7 +289,12 @@ export function createApp({
         }
         if (path === "/api/game/equip")
           return send(200, game.equip(user, b.sku));
+        if (path === "/api/game/interact") {
+          requireThat(demoHost, "demo_host_required", 404);
+          return send(200, demoHost.begin(user, b.npc));
+        }
         if (path === "/api/game/quest") {
+          if (demoHost) return send(200, demoHost.complete(user, b, game));
           requireThat(
             authMode === "anonymous-demo",
             "fixture_quest_disabled",
@@ -275,6 +304,8 @@ export function createApp({
         }
         if (match) {
           const id = match[1];
+          if (match[2] === "resume")
+            return send(200, await commerce.resume(user, id, b));
           if (match[2] === "cancel")
             return send(200, commerce.cancel(user, id));
           if (match[2] === "capture")
@@ -303,6 +334,11 @@ export function createApp({
       }
       send(404, { error: "not_found" });
     } catch (e) {
+      if (demoHost && e.code === "demo_access_required")
+        res.setHeader(
+          "WWW-Authenticate",
+          'Basic realm="Independent Sandbox Demo", charset="UTF-8"',
+        );
       send(e.status ?? 500, {
         error:
           e.code && typeof e.code === "string" && !e.code.startsWith("ERR_")

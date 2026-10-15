@@ -84,7 +84,10 @@ export class PayPalSandboxProvider {
       throw new CommerceError("paypal_auth_response_failed", 502);
     }
     requireThat(
-      typeof data.access_token === "string",
+      typeof data?.access_token === "string" &&
+        data.access_token.length > 0 &&
+        data.access_token.length <= 4096 &&
+        /^[A-Za-z0-9._~+/-]+=*$/.test(data.access_token),
       "paypal_invalid_token",
       502,
     );
@@ -92,31 +95,47 @@ export class PayPalSandboxProvider {
   }
   async request(path, method = "GET", body, requestId) {
     const token = await this.token();
-    const res = await this.fetcher(`${SANDBOX}${path}`, {
-      method,
-      redirect: "error",
-      signal: AbortSignal.timeout(15000),
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Prefer: "return=representation",
-        ...(requestId ? { "PayPal-Request-Id": requestId } : {}),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    let res;
+    try {
+      res = await this.fetcher(`${SANDBOX}${path}`, {
+        method,
+        redirect: "error",
+        signal: AbortSignal.timeout(15000),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+          ...(requestId ? { "PayPal-Request-Id": requestId } : {}),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    } catch {
+      throw new CommerceError("paypal_transport_failed", 502);
+    }
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new CommerceError("paypal_response_failed", 502);
+    }
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
       const error = new CommerceError("paypal_request_failed", 502);
-      // Only known payment declines are terminal; 5xx, 429 and ambiguous errors stay pending.
       error.definitive =
         res.status === 422 &&
-        data.details?.some((d) =>
-          ["INSTRUMENT_DECLINED", "PAYER_CANNOT_PAY"].includes(d.issue),
+        Array.isArray(data?.details) &&
+        data.details.some((d) =>
+          ["INSTRUMENT_DECLINED", "PAYER_CANNOT_PAY"].includes(d?.issue),
         );
       throw error;
     }
-    return res.json();
+    requireThat(
+      data && typeof data === "object" && !Array.isArray(data),
+      "paypal_response_failed",
+      502,
+    );
+    return data;
   }
+
   approvalUrl(id) {
     requireThat(/^[A-Za-z0-9-]+$/.test(id), "invalid_provider_id");
     return `https://www.sandbox.paypal.com/checkoutnow?token=${encodeURIComponent(id)}`;

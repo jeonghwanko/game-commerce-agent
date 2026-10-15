@@ -117,9 +117,11 @@ export class Recommender {
     // Model text, price and effects are never rendered as authoritative product data.
     return {
       mode: this.mode,
+      interpretation: intent,
       products: available,
       plan: {
         goal: plan.goal,
+        projected: plan.projected,
         strategy: plan.strategy,
         reason: plan.reason,
         actions: plan.actions,

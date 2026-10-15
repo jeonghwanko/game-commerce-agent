@@ -59,21 +59,42 @@ test("real HTTP server restart restores pending order, session, grant and equipp
     await start();
     csrf = (await request("/api/session")).csrf;
     const q = await request("/api/commerce/quotes", { sku: "rosalyn-gala" });
-    const o = await request("/api/commerce/orders", {
-      quoteId: q.id,
-      sku: q.sku,
-      amount: q.amount,
-      currency: q.currency,
-      version: q.version,
-      confirm: true,
-    });
+    const originalCreate = app.commerce.p.create.bind(app.commerce.p);
+    app.commerce.p.create = async (...args) => {
+      await originalCreate(...args);
+      throw new Error("lost response");
+    };
+    await assert.rejects(
+      request("/api/commerce/orders", {
+        quoteId: q.id,
+        sku: q.sku,
+        amount: q.amount,
+        currency: q.currency,
+        version: q.version,
+        confirm: true,
+      }),
+      /operation_failed/,
+    );
+    const o = app.store.get("SELECT * FROM orders");
+    assert.equal(o.status, "CREATING");
+    app.store.run("UPDATE quotes SET expires=0 WHERE id=?", q.id);
     await stop();
     await start();
     assert.equal((await request("/api/session")).csrf, csrf);
+    assert.equal((await request("/api/commerce/orders"))[0].status, "CREATING");
     assert.equal(
-      (await request("/api/commerce/orders/" + o.id)).status,
+      (
+        await request("/api/commerce/orders/" + o.id + "/resume", {
+          confirm: true,
+          sku: o.sku,
+          amount: o.amount,
+          currency: o.currency,
+          version: o.version,
+        })
+      ).status,
       "APPROVAL_PENDING",
     );
+    assert.equal(app.store.get("SELECT count(*) n FROM mock_orders").n, 1);
     await request("/api/commerce/orders/" + o.id + "/mock-approve", {});
     await request("/api/game/equip", { sku: o.sku });
     await stop();

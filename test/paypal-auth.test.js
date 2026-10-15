@@ -116,3 +116,68 @@ test("token redirect/transport failures are sanitized and never retry another de
   );
   assert.equal(calls, 1);
 });
+test("untrusted bearer tokens are rejected before header construction without leaking values", async () => {
+  for (const access_token of [
+    null,
+    123,
+    "",
+    "x".repeat(4097),
+    "secret\r\ninjected",
+    "secret value",
+    "secret\tvalue",
+    "secret\u007fvalue",
+    "secret\u0085value",
+  ]) {
+    let calls = 0;
+    const p = new PayPalSandboxProvider(
+      { ...common, oauthBasicAuthHeader: "synthetic" },
+      async () => {
+        calls++;
+        return Response.json({ access_token });
+      },
+    );
+    await assert.rejects(
+      p.request("/v2/checkout/orders/ORDER"),
+      (e) =>
+        e.code === "paypal_invalid_token" &&
+        e.message === "paypal_invalid_token" &&
+        e.cause === undefined,
+    );
+    assert.equal(calls, 1);
+  }
+});
+test("API transport and JSON failures expose fixed errors, never token or upstream text", async () => {
+  for (const failure of ["transport", "json", "shape", "decline-shape"]) {
+    const secret = "synthetic-sensitive-token";
+    const p = new PayPalSandboxProvider(
+      { ...common, oauthBasicAuthHeader: "synthetic" },
+      async (url) => {
+        if (url.endsWith("/token"))
+          return Response.json({ access_token: secret });
+        if (failure === "transport") throw new Error(secret);
+        if (failure === "json")
+          return {
+            ok: true,
+            json: async () => {
+              throw new Error(secret);
+            },
+          };
+        if (failure === "shape") return Response.json(null);
+        return Response.json({ details: secret }, { status: 422 });
+      },
+    );
+    await assert.rejects(p.request("/v2/checkout/orders/ORDER"), (e) => {
+      assert.equal(e.name, "Error");
+      assert.equal(e.status, 502);
+      assert.ok(
+        [
+          "paypal_transport_failed",
+          "paypal_response_failed",
+          "paypal_request_failed",
+        ].includes(e.code),
+      );
+      assert.ok(!inspect(e).includes(secret));
+      return true;
+    });
+  }
+});

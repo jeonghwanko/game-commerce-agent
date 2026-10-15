@@ -12,24 +12,26 @@ Real AI additionally requires explicit access enablement and a positive persiste
 
 ## HTTP interface
 
-| Method/path                                  | Input / result                                                                                      |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `GET /api/session`                           | Issue/resume anonymous session; return CSRF token and explicit provider modes                       |
-| `GET /api/commerce/catalog`                  | Active canonical SKU records, minor-unit prices and versions                                        |
-| `POST /api/commerce/agent/recommend`         | `{goal, budgetMinor}` → server-validated goal plan, max two canonical products and free alternative |
-| `POST /api/commerce/quotes`                  | `{sku}` → five-minute quote bound to session owner and catalog version                              |
-| `POST /api/commerce/orders`                  | `{quoteId, sku, amount, currency, version, confirm:true}`; exact displayed quote required           |
-| `GET /api/commerce/orders`                   | This session’s latest 20 orders                                                                     |
-| `GET /api/commerce/orders/:id`               | Owned order status                                                                                  |
-| `POST /api/commerce/orders/:id/capture`      | Inspect approval, capture using stable request ID, re-read payment                                  |
-| `POST /api/commerce/orders/:id/cancel`       | Local cancellation before capture attempt                                                           |
-| `POST /api/commerce/orders/:id/mock-approve` | Mock mode only; explicit simulated approval/capture/webhook                                         |
-| `POST /api/paypal/webhooks`                  | Provider authentication through PayPal signature verification, not browser session                  |
-| `GET /api/commerce/entitlements`             | Own rights, including held status                                                                   |
-| `GET /api/game`                              | Original fixture wardrobe and three independent guard conditions                                    |
-| `POST /api/game/equip`                       | `{sku}`; active server entitlement or free borrowed outfit required                                 |
-| `POST /api/game/quest`                       | `{quest}`: seal, rumor or borrowed; anonymous fixture only                                          |
-| `GET /api/analytics/funnel`                  | Own session event counts only                                                                       |
+| Method/path                                  | Input / result                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/session`                           | Issue/resume anonymous session; return CSRF token and explicit provider modes                                                    |
+| `GET /api/commerce/catalog`                  | Active canonical SKU records, minor-unit prices and versions                                                                     |
+| `POST /api/commerce/agent/recommend`         | `{goal, budgetMinor}` → server-validated goal plan, max two canonical products and free alternative                              |
+| `POST /api/commerce/quotes`                  | `{sku}` → five-minute quote bound to session owner and catalog version                                                           |
+| `POST /api/commerce/orders`                  | `{quoteId, sku, amount, currency, version, confirm:true}`; exact displayed quote required                                        |
+| `GET /api/commerce/orders`                   | This session’s latest 20 orders                                                                                                  |
+| `GET /api/commerce/orders/:id`               | Owned order status                                                                                                               |
+| `POST /api/commerce/orders/:id/capture`      | Inspect approval, capture using stable request ID, re-read payment                                                               |
+| `POST /api/commerce/orders/:id/resume`       | `{sku, amount, currency, version, confirm:true}` reuses original CREATING consent/key; no new quote                              |
+| `POST /api/commerce/orders/:id/cancel`       | Local cancellation before capture attempt                                                                                        |
+| `POST /api/commerce/orders/:id/mock-approve` | Mock mode only; explicit simulated approval/capture/webhook                                                                      |
+| `POST /api/paypal/webhooks`                  | Provider authentication through PayPal signature verification, not browser session                                               |
+| `GET /api/commerce/entitlements`             | Own rights, including held status                                                                                                |
+| `GET /api/game`                              | Original fixture wardrobe and three independent guard conditions                                                                 |
+| `POST /api/game/equip`                       | `{sku}`; active server entitlement or free borrowed outfit required                                                              |
+| `POST /api/game/interact`                    | Explicit independent demo host only: `{npc}` → principal-bound, expiring dialogue challenge                                      |
+| `POST /api/game/quest`                       | `{quest}`: seal, rumor or borrowed; anonymous fixture, or `{quest, challenge}` with explicit independent authenticated demo host |
+| `GET /api/analytics/funnel`                  | Own session event counts only                                                                                                    |
 
 Catalog controls money, currency and effect; the model controls none of them. Quotes cannot be used by another session or changed after confirmation. A retry of the same confirmed quote returns/reconciles its existing order even after quote expiry. A new order requires an unexpired quote and unchanged catalog. Unknown/held entitlement cannot be equipped for a paid effect.
 
@@ -72,3 +74,7 @@ The read-only interpreter returns exactly `{goals, style, avoidStyles, spending,
 `PAYMENT.CAPTURE.REVERSED` with `resource_type=refund` follows refund-ID → allowed capture link → fixed API correlation, just like refund-shaped REFUNDED. A capture resource remains distinct. Partial refund/reversal conservatively holds the complete cosmetic right for review. Late completion cannot undo a hold. Unknown resource types fail closed.
 
 Official [PayPal event names](https://developer.paypal.com/api/rest/webhooks/event-names/) link REVERSED to the refund operation; the [Payments v2 schema](https://github.com/paypal/paypal-rest-api-specifications/blob/main/openapi/payments_payment_v2.json) supplies refund/capture resources. The reported [WooCommerce #1614](https://github.com/woocommerce/woocommerce-paypal-payments/issues/1614) is a compatibility regression input, not a replacement for signature/API validation. Tests use synthetic IDs and Sandbox origins, with no private payer fields copied.
+
+The authoritative planner projects equipment after each action before adding a dress-code repair. Owning a cloak does not require wearing it during story entry; an owned formal coat satisfies entry without borrowing another outfit. Reviews never grant or equip hypothetical purchases. Projection is advisory and the server still validates each actual equip/quest request against current state. Gold evaluation independently checks final dress/seal/rumor state and required/allowed actions, not the planner's own projection.
+
+The explicit independent demo host binds its database to `independent-sandbox-demo` and its stable principal issuer. It issues no anonymous principals. Server challenges authorize only one named free quest, expire in two minutes, and are consumed transactionally. Generic principal mode still rejects fixture quest mutation; private host integration remains separate.

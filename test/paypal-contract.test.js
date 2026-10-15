@@ -258,7 +258,7 @@ test("invalid signature and verification network failure do not mark receipts or
 test("Sandbox adapter retries uncertain create using original key and recovers lost capture response without recapture", async (t) => {
   const f = fixture(t);
   f.remote.afterCreateFailure = true;
-  await assert.rejects(f.create(), /create response timeout/);
+  await assert.rejects(f.create(), /paypal_transport_failed/);
   const q = f.s.get("SELECT * FROM quotes");
   const confirm = {
     quoteId: q.id,
@@ -277,7 +277,7 @@ test("Sandbox adapter retries uncertain create using original key and recovers l
   );
   f.approve();
   f.remote.afterCaptureFailure = true;
-  await assert.rejects(f.c.capture("alice", o.id), /capture response timeout/);
+  await assert.rejects(f.c.capture("alice", o.id), /paypal_transport_failed/);
   await f.c.capture("alice", o.id);
   assert.equal(f.calls.filter((c) => c.url.endsWith("/capture")).length, 1);
   assert.equal(f.c.owned("alice", o.id).status, "AWAITING_WEBHOOK");

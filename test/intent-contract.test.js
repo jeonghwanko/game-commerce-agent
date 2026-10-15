@@ -2,10 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Recommender } from "../src/recommend.js";
 import { planGoal } from "../src/planner.js";
+import { scoreIntent } from "../fixtures/score-intent.js";
 import { catalog } from "../src/catalog.js";
 import { intentCases, baseContext } from "../fixtures/intent-evaluation.js";
 for (const [i, c] of intentCases.entries())
-  test(`interpreted plan contract ${i + 1}/36 ${c.category}/${c.state} (stub, not model quality)`, async () => {
+  test(`interpreted plan contract ${i + 1}/${intentCases.length} ${c.category}/${c.state} (stub, not model quality)`, async () => {
     const before = JSON.stringify(c.context);
     const r = new Recommender({
       mode: "openai",
@@ -24,36 +25,8 @@ for (const [i, c] of intentCases.entries())
       }),
     });
     const result = await r.recommend(c, c.context);
-    const expected = planGoal(
-      c.expectedIntent,
-      c.budgetMinor,
-      c.context,
-      catalog,
-    );
-    assert.equal(result.plan.strategy, expected.strategy);
     assert.equal(JSON.stringify(c.context), before);
-    for (const p of result.products) {
-      assert.deepEqual(
-        p,
-        catalog.find((x) => x.sku === p.sku),
-      );
-      assert.ok(p.amount <= c.budgetMinor);
-      assert.ok(!c.context.owned.includes(p.sku));
-    }
-    if (c.expectedIntent.spending === "free" || c.expectedIntent.clarify)
-      assert.equal(result.products.length, 0);
-    if (c.category === "collection" && c.state === "free-story-complete")
-      assert.equal(result.products[0].sku, "rosalyn-gala");
-    if (c.category === "negation")
-      assert.deepEqual(
-        result.products.map((p) => p.sku),
-        ["rosalyn-traveler"],
-      );
-    if (c.category === "mixed")
-      assert.ok(
-        result.plan.actions.some((a) => a.type === "borrow") ||
-          c.context.formal,
-      );
+    assert.deepEqual(scoreIntent(c, result), { match: true, errors: [] });
   });
 test("offline rehearsal phrases and negation are handled; collection survives loan and completed story", async () => {
   const r = new Recommender();
@@ -92,4 +65,33 @@ test("server independently filters hostile typed interpretations across budgets 
         );
         assert.equal(p.eligibleSkus.length, 0);
       }
+});
+
+test("gold rejects collection-only mixed result and missing/overwriting actions even if strategy/SKU match", () => {
+  const c = intentCases.find(
+    (c) => c.category === "mixed" && c.state === "new",
+  );
+  const intent = c.expectedIntent;
+  const p = planGoal(intent, c.budgetMinor, c.context, catalog);
+  const good = {
+    interpretation: intent,
+    plan: p,
+    products: catalog.filter((x) => p.eligibleSkus.includes(x.sku)),
+  };
+  assert.equal(scoreIntent(c, good).match, true);
+  for (const bad of [
+    { ...good, interpretation: { ...intent, goals: ["collection"] } },
+    {
+      ...good,
+      plan: { ...p, actions: p.actions.filter((a) => a.quest !== "seal") },
+    },
+    {
+      ...good,
+      plan: {
+        ...p,
+        actions: [...p.actions, { type: "equip", sku: "rosalyn-traveler" }],
+      },
+    },
+  ])
+    assert.equal(scoreIntent(c, bad).match, false);
 });

@@ -104,7 +104,7 @@ test("AI $5 reservation cap survives restart; rejected payloads never call trans
       s,
       async () => {
         calls++;
-        return {};
+        return Response.json({});
       },
       () => Date.parse("2026-10-15"),
     );

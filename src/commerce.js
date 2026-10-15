@@ -118,11 +118,13 @@ export class Commerce {
     );
     try {
       const remote = await this.p.create(o);
-      this.s.run(
-        "UPDATE orders SET provider_id=?,status='APPROVAL_PENDING' WHERE id=? AND status='CREATING'",
+      const bound = this.s.run(
+        "UPDATE orders SET provider_id=?,status=CASE WHEN status='CREATING' THEN 'APPROVAL_PENDING' ELSE status END WHERE id=? AND (provider_id IS NULL OR provider_id=?)",
         remote.id,
         o.id,
+        remote.id,
       );
+      requireThat(bound.changes === 1, "create_provider_conflict", 409);
       if (
         this.s.get(
           "SELECT 1 FROM verified_webhooks WHERE provider=? AND provider_id=? AND type IN ('PAYMENT.CAPTURE.REFUNDED','PAYMENT.CAPTURE.REVERSED')",
@@ -140,6 +142,24 @@ export class Commerce {
       this.s.event(user, "payment_pending", o.id);
       throw e;
     }
+  }
+  async resume(user, id, confirmation) {
+    const o = this.owned(user, id);
+    requireThat(
+      confirmation.confirm === true &&
+        confirmation.sku === o.sku &&
+        confirmation.amount === o.amount &&
+        confirmation.currency === o.currency &&
+        confirmation.version === o.version,
+      "explicit_confirmation_required",
+    );
+    requireThat(
+      ["CREATING", "APPROVAL_PENDING"].includes(o.status),
+      "order_not_resumable",
+      409,
+    );
+    // Reuse persisted consent, quote and local request key; never mint a replacement.
+    return this.create(user, { ...confirmation, quoteId: o.quote_id });
   }
   validate(o, remote) {
     if (this.p.name === "paypal-sandbox") {
@@ -359,7 +379,7 @@ export class Commerce {
       const o = this.owned(user, id);
       if (o.status === "CANCELLED") return o;
       const changed = this.s.run(
-        "UPDATE orders SET status='CANCELLED' WHERE id=? AND status='APPROVAL_PENDING' AND NOT EXISTS(SELECT 1 FROM capture_operations WHERE order_id=?)",
+        "UPDATE orders SET status='CANCELLED' WHERE id=? AND status IN ('CREATING','APPROVAL_PENDING') AND NOT EXISTS(SELECT 1 FROM capture_operations WHERE order_id=?)",
         id,
         id,
       );

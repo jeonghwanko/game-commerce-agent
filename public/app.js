@@ -23,6 +23,11 @@ const scene = new AtelierScene($("#world"), (place) =>
   run(async () => {
     const actions = $("#dialogue-actions");
     actions.replaceChildren();
+    const dialogue =
+      session.gameHost === "independent-sandbox-demo" &&
+      ["shop", "seal", "rumor"].includes(place)
+        ? await api("/api/game/interact", { npc: place })
+        : {};
     if (place === "shop") {
       $("#shop-panel").hidden = false;
       $("#goal").focus();
@@ -30,7 +35,7 @@ const scene = new AtelierScene($("#world"), (place) =>
         "Rosalyn: Let’s solve your goal. The gala coat has gold star embroidery; the traveler’s cloak has a flowing teal cape. Borrowed formal clothes pass the same dress check, for free.";
       actions.append(
         button("Borrow formal clothes · Free", async () => {
-          await api("/api/game/quest", { quest: "borrowed" });
+          await api("/api/game/quest", { quest: "borrowed", ...dialogue });
           await api("/api/game/equip", { sku: "borrowed" });
           await refresh();
           $("#dialogue-text").textContent =
@@ -48,7 +53,7 @@ const scene = new AtelierScene($("#world"), (place) =>
             ? "Accept the seal · Free"
             : "Remember the rumor · Free",
           async () => {
-            await api("/api/game/quest", { quest: place });
+            await api("/api/game/quest", { quest: place, ...dialogue });
             await refresh();
             actions.replaceChildren();
           },
@@ -230,6 +235,7 @@ async function showOrder(o) {
   );
   activeOrder = o.id;
   pendingOrder = [
+    "CREATING",
     "APPROVAL_PENDING",
     "CAPTURE_PENDING",
     "AWAITING_WEBHOOK",
@@ -240,6 +246,33 @@ async function showOrder(o) {
   $("#checkout").replaceChildren();
   $("#status").textContent =
     `Order ${statuses[o.status] ?? "Checking purchase"}`;
+  if (o.status === "CREATING") {
+    $("#quote").append(
+      text(
+        "p",
+        "This purchase was already confirmed. Resume uses the same original quote and order request; it does not change its price or start a second purchase. A quote expiry does not erase saved consent. Recovery older than five hours needs operator review.",
+      ),
+    );
+    $("#checkout").append(
+      button(`Resume confirmed purchase · ${price(o)}`, async () =>
+        showOrder(
+          await api(`/api/commerce/orders/${o.id}/resume`, {
+            confirm: true,
+            sku: o.sku,
+            amount: o.amount,
+            currency: o.currency,
+            version: o.version,
+          }),
+        ),
+      ),
+      button("Cancel checkout", async () =>
+        showOrder(await api(`/api/commerce/orders/${o.id}/cancel`, {})),
+      ),
+      button("Refresh saved status", async () =>
+        showOrder(await api(`/api/commerce/orders/${o.id}`)),
+      ),
+    );
+  }
   if (o.status === "APPROVAL_PENDING") {
     if (session.paymentMode === "mock")
       $("#checkout").append(
@@ -352,9 +385,12 @@ async function boot() {
   } else {
     const orders = await api("/api/commerce/orders");
     const pending = orders.find((o) =>
-      ["APPROVAL_PENDING", "CAPTURE_PENDING", "AWAITING_WEBHOOK"].includes(
-        o.status,
-      ),
+      [
+        "CREATING",
+        "APPROVAL_PENDING",
+        "CAPTURE_PENDING",
+        "AWAITING_WEBHOOK",
+      ].includes(o.status),
     );
     if (pending)
       await showOrder(await api(`/api/commerce/orders/${pending.id}`));

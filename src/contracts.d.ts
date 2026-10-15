@@ -79,8 +79,22 @@ export interface PrincipalVerifier {
 export interface GoalPlan {
   goal: "guard" | "travel" | "outfit" | "unsupported";
   strategy: "use_owned" | "use_free" | "no_purchase" | "consider_purchase";
+  projected: {
+    equipped: string | null;
+    formal: boolean;
+    borrowed: boolean;
+    seal: boolean;
+    rumor: boolean;
+    canEnter: boolean;
+  };
   actions: Array<{
-    type: "equip" | "borrow" | "quest" | "review_purchase" | "no_purchase";
+    type:
+      | "equip"
+      | "keep_owned"
+      | "borrow"
+      | "quest"
+      | "review_purchase"
+      | "no_purchase";
     label: string;
     sku?: string;
     quest?: "seal" | "rumor";
