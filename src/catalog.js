@@ -4,7 +4,7 @@ export const catalog = Object.freeze([
     sku: "rosalyn-gala",
     name: "Rosalyn Gala Outfit",
     description:
-      "A formal outfit for the guard’s dress check. Seal and rumor quests still required.",
+      "A violet gala coat with gold star embroidery for your collection. Passes the same dress check as free borrowed clothes; seal and rumor quests still required.",
     amount: 199,
     currency: "USD",
     version: CATALOG_VERSION,
@@ -15,7 +15,7 @@ export const catalog = Object.freeze([
     sku: "rosalyn-traveler",
     name: "Traveler’s Cloak",
     description:
-      "A cosmetic travel outfit. Does not satisfy the formal dress check.",
+      "A flowing teal cloak for your collection. Cosmetic only; does not satisfy the formal dress check.",
     amount: 99,
     currency: "USD",
     version: CATALOG_VERSION,

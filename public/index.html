@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Rosalyn’s Atelier · Game Commerce Agent</title>
     <link rel="stylesheet" href="/style.css" />
+    <script src="/scene.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -13,18 +14,40 @@
       ><span id="mode">Connecting…</span>
     </header>
     <main>
-      <section class="intro">
-        <p class="eyebrow">ONE SHOP. YOUR CHOICE.</p>
-        <h1>A disguise begins<br />with a conversation.</h1>
-        <p>Rosalyn’s Atelier · an independent game fixture</p>
-        <div class="scene" aria-label="Original illustrated boutique">
-          <div class="window"></div>
-          <div class="outfit">♜</div>
-          <div class="counter">ROSALYN’S ATELIER</div>
-          <span class="lamp">✦</span>
+      <section class="intro wide">
+        <p class="eyebrow">A SMALL ADVENTURE. YOUR CHOICE.</p>
+        <h1>Dress for the story.</h1>
+        <p>
+          The gathering is beyond the gate. Find your look, a seal, and the
+          rumor. Every story path can be completed for free.
+        </p>
+        <canvas
+          id="world"
+          width="1000"
+          height="450"
+          tabindex="0"
+          aria-label="Playable atelier courtyard. Click to walk, use arrow keys or WASD, and E to talk."
+        ></canvas>
+        <div class="travel">
+          <button data-walk="shop">Walk to shop</button
+          ><button data-walk="seal">Walk to courier</button
+          ><button data-walk="rumor">Walk to archivist</button
+          ><button data-walk="guard">Walk to guard</button
+          ><button id="interact" disabled>Walk near someone to talk</button>
+        </div>
+        <p class="controls">
+          Click the courtyard or use WASD / arrow keys to move · E to talk ·
+          Walk through the open gate to finish
+        </p>
+        <div class="dialogue">
+          <p id="dialogue-text" role="status">
+            Visit Rosalyn for a look that fits your plan. Or ask to borrow
+            formal clothes for free.
+          </p>
+          <div id="dialogue-actions"></div>
         </div>
       </section>
-      <section class="panel">
+      <section class="panel" id="shop-panel" hidden>
         <h2>Ask Rosalyn</h2>
         <p>Tell me your goal and budget. Buying is always optional.</p>
         <p id="ai-notice"></p>
@@ -43,13 +66,20 @@ I need formal clothes to get past the guard.</textarea
             required
           /><button>Recommend outfits</button>
         </form>
+        <div id="plan"></div>
         <div id="products"></div>
         <p id="alternative">
           Free route: borrow formal clothes, find a seal, and learn the rumor.
         </p>
       </section>
-      <section class="panel">
-        <h2>Purchase confirmation</h2>
+      <section class="panel" id="purchase-panel" hidden>
+        <h2>Your fitting room</h2>
+        <canvas
+          id="preview"
+          width="240"
+          height="140"
+          aria-label="Outfit preview"
+        ></canvas>
         <div id="quote">
           Select an outfit to see its exact price and contents.
         </div>
@@ -59,22 +89,17 @@ I need formal clothes to get past the guard.</textarea
       <section class="panel">
         <h2>Wardrobe & the gate</h2>
         <div id="wardrobe"></div>
-        <div class="quests">
-          <button data-quest="borrowed">Borrow formal clothes · Free</button
-          ><button data-quest="seal">Find the seal · Free</button
-          ><button data-quest="rumor">Learn the rumor · Free</button>
-        </div>
         <p id="guard"></p>
         <p id="requirements"></p>
       </section>
-      <section class="panel wide">
-        <h2>Your session’s funnel</h2>
+      <details class="panel wide" id="evidence-panel">
+        <summary>Evidence panel · session funnel</summary>
         <p>
           Only event names and pseudonymous IDs are stored. No conversation,
           payment details or email enters analytics.
         </p>
         <div id="funnel"></div>
-      </section>
+      </details>
     </main>
     <footer>
       Sandbox only. Original demo content. No real money. AI never approves a

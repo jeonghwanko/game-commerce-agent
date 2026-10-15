@@ -32,6 +32,21 @@ async function paid(c, p, o) {
   return p.inspect(o.provider_id);
 }
 function event(r, id = "evt-1", type = "PAYMENT.CAPTURE.COMPLETED") {
+  if (type === "PAYMENT.CAPTURE.REFUNDED")
+    return {
+      id,
+      event_type: type,
+      resource: {
+        id: `refund-${id}`,
+        status: "COMPLETED",
+        links: [
+          {
+            rel: "up",
+            href: `https://api-m.sandbox.paypal.com/v2/payments/captures/${r.captureId}`,
+          },
+        ],
+      },
+    };
   return {
     id,
     event_type: type,

@@ -201,3 +201,74 @@ footer {
     padding: 22px;
   }
 }
+[hidden] {
+  display: none !important;
+}
+#world {
+  width: 100%;
+  aspect-ratio: 1000/450;
+  border-radius: 20px;
+  border: 1px solid #5e7463;
+  cursor: crosshair;
+  display: block;
+  touch-action: manipulation;
+}
+.intro.wide {
+  padding: 0;
+}
+.intro.wide h1 {
+  font-size: 3.4rem;
+  margin: 12px 0;
+}
+.travel {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.travel button {
+  font-size: 0.8rem;
+  padding: 9px 12px;
+  background: #34483b;
+  color: #e5e9d8;
+}
+.travel #interact {
+  background: var(--accent);
+  color: #172719;
+}
+.controls {
+  font-size: 0.75rem;
+}
+.dialogue {
+  border-left: 3px solid var(--accent);
+  padding: 4px 20px;
+  background: #202c25;
+  min-height: 85px;
+  border-radius: 0 12px 12px 0;
+}
+.dialogue p {
+  color: #e0e7cf;
+}
+.panel summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+#preview {
+  display: block;
+  border-radius: 12px;
+  margin-bottom: 18px;
+}
+#plan p {
+  padding-left: 12px;
+  border-left: 2px solid #697f50;
+}
+#evidence-panel:not([open]) {
+  padding: 18px 28px;
+}
+#wardrobe {
+  display: flex;
+  flex-wrap: wrap;
+}
+.outfit-caption {
+  font-size: 0.8rem;
+}

@@ -1,4 +1,5 @@
 import { product, requireThat } from "./catalog.js";
+import { entitlementViews } from "./entitlements.js";
 export class GameBridge {
   constructor(store) {
     this.s = store;
@@ -6,10 +7,7 @@ export class GameBridge {
   state(user) {
     this.s.run("INSERT OR IGNORE INTO game(user_id) VALUES(?)", user);
     const g = this.s.get("SELECT * FROM game WHERE user_id=?", user);
-    const entitlements = this.s.all(
-      "SELECT sku,status FROM entitlements WHERE user_id=?",
-      user,
-    );
+    const entitlements = entitlementViews(this.s, user);
     const owned = entitlements
       .filter((e) => e.status === "active")
       .map((e) => e.sku);

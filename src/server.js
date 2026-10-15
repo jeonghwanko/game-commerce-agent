@@ -9,15 +9,18 @@ import { MockProvider } from "./providers/mock.js";
 import { PayPalSandboxProvider } from "./providers/paypal.js";
 import { Recommender } from "./recommend.js";
 import { GameBridge } from "./game.js";
+import { ExternalWorkBudget } from "./budget.js";
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 async function body(req) {
-  let raw = "";
+  const chunks = [];
+  let bytes = 0;
   for await (const chunk of req) {
-    raw += chunk;
-    requireThat(Buffer.byteLength(raw) <= 8192, "body_too_large", 413);
+    bytes += chunk.length;
+    requireThat(bytes <= 8192, "body_too_large", 413);
+    chunks.push(chunk);
   }
   try {
-    const parsed = JSON.parse(raw || "{}");
+    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
     requireThat(
       parsed && typeof parsed === "object" && !Array.isArray(parsed),
       "invalid_json",
@@ -31,8 +34,24 @@ export function createApp({
   store = new Store(process.env.DATABASE_PATH ?? "./data/commerce.sqlite"),
   provider,
   recommender,
+  identity,
+  aiAccessEnabled = process.env.AI_ACCESS_ENABLED === "true",
+  aiCallLimit = Number(process.env.AI_TOTAL_CALL_LIMIT ?? 0),
+  authMode = process.env.AUTH_MODE ?? "anonymous-demo",
   origin = process.env.PUBLIC_ORIGIN ?? "http://localhost:3000",
 } = {}) {
+  requireThat(
+    ["anonymous-demo", "principal"].includes(authMode),
+    "invalid_auth_mode",
+  );
+  requireThat(
+    authMode !== "principal" || typeof identity?.resolve === "function",
+    "principal_adapter_required",
+  );
+  requireThat(
+    process.env.NODE_ENV !== "production" || authMode === "principal",
+    "production_requires_principal",
+  );
   const mode = process.env.PAYMENT_PROVIDER ?? "mock";
   requireThat(
     ["mock", "paypal-sandbox"].includes(mode),
@@ -45,6 +64,12 @@ export function createApp({
           clientId: process.env.PAYPAL_CLIENT_ID,
           clientSecret: process.env.PAYPAL_CLIENT_SECRET,
           webhookId: process.env.PAYPAL_WEBHOOK_ID,
+          merchantId: process.env.PAYPAL_MERCHANT_ID,
+          webhookBudget: new ExternalWorkBudget(store, {
+            name: "paypal-webhooks",
+            limit: Number(process.env.WEBHOOK_TOTAL_VERIFY_LIMIT ?? 100),
+            concurrency: 2,
+          }),
           baseUrl: process.env.PAYPAL_BASE_URL,
           origin,
         });
@@ -52,6 +77,16 @@ export function createApp({
     mode: process.env.AI_PROVIDER ?? "mock",
     key: process.env.OPENAI_API_KEY,
     model: process.env.OPENAI_MODEL,
+  });
+  if (recommender.mode === "openai")
+    requireThat(
+      authMode === "principal" && aiAccessEnabled && aiCallLimit > 0,
+      "real_ai_access_not_authorized",
+    );
+  const aiBudget = new ExternalWorkBudget(store, {
+    name: "ai-recommendations",
+    limit: aiCallLimit,
+    concurrency: 2,
   });
   const commerce = new Commerce(store, provider),
     game = new GameBridge(store);
@@ -83,7 +118,7 @@ export function createApp({
       }
       if (
         req.method === "GET" &&
-        ["/", "/app.js", "/style.css"].includes(path)
+        ["/", "/app.js", "/scene.js", "/style.css"].includes(path)
       ) {
         const file = path === "/" ? "index.html" : path.slice(1);
         res.setHeader(
@@ -103,14 +138,16 @@ export function createApp({
         .find((s) => s.startsWith("gca_session="))
         ?.slice(12);
       let session =
-        token &&
-        store.get(
-          "SELECT * FROM sessions WHERE token_hash=? AND expires>?",
-          hash(token),
-          Date.now(),
-        );
+        authMode === "principal"
+          ? await identity.resolve(req, store)
+          : token &&
+            store.get(
+              "SELECT * FROM sessions WHERE token_hash=? AND expires>?",
+              hash(token),
+              Date.now(),
+            );
       if (req.method === "GET" && path === "/api/session") {
-        if (!session) {
+        if (!session && authMode === "anonymous-demo") {
           const raw = randomBytes(32).toString("hex");
           session = {
             user_id: randomUUID(),
@@ -134,11 +171,15 @@ export function createApp({
           csrf: session.csrf,
           paymentMode: provider.name,
           aiMode: recommender.mode,
+          authMode,
         });
       }
       requireThat(session, "session_required", 401);
       const user = session.user_id;
-      requireThat(!url.searchParams.has("userId"), "session_identity_only");
+      requireThat(
+        !url.searchParams.has("userId") && !url.searchParams.has("user_id"),
+        "session_identity_only",
+      );
       if (req.method === "POST") {
         requireThat(
           req.headers.origin === origin &&
@@ -205,7 +246,10 @@ export function createApp({
           inFlightAI.add(user);
           try {
             store.event(user, "agent_query_submitted");
-            const r = await recommender.recommend(b, game.state(user));
+            const recommend = () => recommender.recommend(b, game.state(user));
+            const r = await (recommender.mode === "openai"
+              ? aiBudget.run(recommend)
+              : recommend());
             if (r.products.length) store.event(user, "product_recommended");
             return send(200, r);
           } finally {
@@ -214,8 +258,14 @@ export function createApp({
         }
         if (path === "/api/game/equip")
           return send(200, game.equip(user, b.sku));
-        if (path === "/api/game/quest")
+        if (path === "/api/game/quest") {
+          requireThat(
+            authMode === "anonymous-demo",
+            "fixture_quest_disabled",
+            404,
+          );
           return send(200, game.quest(user, b.quest));
+        }
         if (match) {
           const id = match[1];
           if (match[2] === "cancel")

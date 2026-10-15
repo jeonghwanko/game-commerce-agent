@@ -34,7 +34,29 @@ export class Store {
       CREATE TABLE IF NOT EXISTS webhook_receipts (id TEXT PRIMARY KEY, order_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, order_id TEXT, name TEXT NOT NULL, at INTEGER NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS mock_orders (id TEXT PRIMARY KEY, reference TEXT NOT NULL UNIQUE, amount INTEGER NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL, capture_id TEXT);
-      CREATE TABLE IF NOT EXISTS game (user_id TEXT PRIMARY KEY, equipped TEXT, seal INTEGER NOT NULL DEFAULT 0, rumor INTEGER NOT NULL DEFAULT 0, borrowed INTEGER NOT NULL DEFAULT 0);`);
+      CREATE TABLE IF NOT EXISTS game (user_id TEXT PRIMARY KEY, equipped TEXT, seal INTEGER NOT NULL DEFAULT 0, rumor INTEGER NOT NULL DEFAULT 0, borrowed INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS environment (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS external_budgets (name TEXT PRIMARY KEY, used INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS capture_operations (order_id TEXT PRIMARY KEY REFERENCES orders(id), token TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS principals (identity_hash TEXT PRIMARY KEY, user_id TEXT UNIQUE NOT NULL);
+      CREATE TABLE IF NOT EXISTS verified_webhooks (provider TEXT NOT NULL, id TEXT NOT NULL, type TEXT NOT NULL, provider_id TEXT, capture_id TEXT, PRIMARY KEY(provider,id));`);
+  }
+  bindProvider(provider) {
+    this.transaction(() => {
+      const bound = this.get(
+        "SELECT value FROM environment WHERE key='payment_provider'",
+      );
+      const incompatible = this.get(
+        "SELECT 1 FROM orders WHERE provider<>? LIMIT 1",
+        provider,
+      );
+      if ((bound && bound.value !== provider) || incompatible)
+        throw new Error("database_provider_mismatch");
+      this.run(
+        "INSERT OR IGNORE INTO environment VALUES('payment_provider',?)",
+        provider,
+      );
+    });
   }
   get(sql, ...args) {
     return this.db.prepare(sql).get(...args);

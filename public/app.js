@@ -2,6 +2,62 @@ const $ = (s) => document.querySelector(s);
 let session;
 let activeOrder;
 let busy = false;
+const scene = new AtelierScene($("#world"), (place) =>
+  run(async () => {
+    const actions = $("#dialogue-actions");
+    actions.replaceChildren();
+    if (place === "shop") {
+      $("#shop-panel").hidden = false;
+      $("#purchase-panel").hidden = false;
+      $("#dialogue-text").textContent =
+        "Rosalyn: Let’s solve your goal. The gala coat has gold star embroidery; the traveler’s cloak has a flowing teal cape. Borrowed formal clothes pass the same dress check, for free.";
+      actions.append(
+        button("Borrow formal clothes · Free", async () => {
+          await api("/api/game/quest", { quest: "borrowed" });
+          await api("/api/game/equip", { sku: "borrowed" });
+          await refresh();
+          $("#dialogue-text").textContent =
+            "Rosalyn: A loan, freely given. You still need the seal and rumor.";
+        }),
+      );
+    } else if (place === "seal" || place === "rumor") {
+      $("#dialogue-text").textContent =
+        place === "seal"
+          ? "Courier: Take this invitation seal to the gatekeeper. It is yours, no purchase required."
+          : "Archivist: The password is ‘The moon wears silver.’ Remember it at the gate. No purchase required.";
+      actions.append(
+        button(
+          place === "seal"
+            ? "Accept the seal · Free"
+            : "Remember the rumor · Free",
+          async () => {
+            await api("/api/game/quest", { quest: place });
+            await refresh();
+            actions.replaceChildren();
+          },
+        ),
+      );
+    } else {
+      const state = await api("/api/game");
+      $("#dialogue-text").textContent = state.canEnter
+        ? "Gatekeeper: Your clothes, seal and rumor are in order. The gate is open; walk through!"
+        : `Gatekeeper: ${state.reaction}`;
+    }
+  }),
+);
+document
+  .querySelectorAll("[data-walk]")
+  .forEach((b) => (b.onclick = () => scene.walkTo(b.dataset.walk)));
+$("#interact").onclick = () => scene.interact();
+function preview(sku) {
+  const c = $("#preview").getContext("2d");
+  c.clearRect(0, 0, 240, 140);
+  c.fillStyle = "#172922";
+  c.fillRect(0, 0, 240, 140);
+  c.textAlign = "center";
+  AtelierScene.avatar(c, 120, 80, sku, 2);
+}
+
 const text = (tag, value, className) => {
   const el = document.createElement(tag);
   el.textContent = value;
@@ -47,6 +103,7 @@ async function refresh() {
     api("/api/game"),
     api("/api/analytics/funnel"),
   ]);
+  scene.update(g);
   $("#wardrobe").replaceChildren();
   for (const sku of [...g.owned, ...(g.borrowed ? ["borrowed"] : [])])
     $("#wardrobe").append(
@@ -65,6 +122,8 @@ async function refresh() {
   );
 }
 async function select(p) {
+  preview(p.sku);
+  $("#purchase-panel").hidden = false;
   const q = await api("/api/commerce/quotes", { sku: p.sku });
   $("#quote").replaceChildren(
     text("h3", p.name),
@@ -90,6 +149,13 @@ async function select(p) {
     "Review the product, amount, and currency before confirming.";
 }
 async function showOrder(o) {
+  $("#purchase-panel").hidden = false;
+  preview(o.sku);
+  $("#quote").replaceChildren(
+    text("h3", o.sku),
+    text("p", price(o), "price"),
+    text("p", `Your confirmed outfit purchase · ${o.status}`),
+  );
   activeOrder = o.id;
   $("#checkout").replaceChildren();
   $("#status").textContent = `Order ${o.status}`;
@@ -137,7 +203,9 @@ async function showOrder(o) {
     $("#quote").textContent = "Verified. Your outfit is in the wardrobe.";
   if (o.status === "AWAITING_WEBHOOK")
     $("#status").textContent =
-      "Capture checked. Waiting for a verified PayPal webhook; no outfit granted yet.";
+      session.paymentMode === "mock"
+        ? "Capture checked. Waiting for a verified simulated webhook (MOCK); no outfit granted yet."
+        : "Capture checked. Waiting for a verified PayPal webhook; no outfit granted yet.";
   await refresh();
 }
 $("#recommend").onsubmit = (e) => {
@@ -147,6 +215,10 @@ $("#recommend").onsubmit = (e) => {
       goal: $("#goal").value,
       budgetMinor: Math.round(Number($("#budget").value) * 100),
     });
+    $("#plan").replaceChildren(
+      text("h3", "Your goal plan"),
+      ...result.plan.actions.map((action) => text("p", action.label)),
+    );
     $("#products").replaceChildren();
     for (const p of result.products) {
       const card = text("div", "", "product");
@@ -154,7 +226,7 @@ $("#recommend").onsubmit = (e) => {
         text("h3", p.name),
         text("p", p.description),
         text("p", price(p), "price"),
-        button("Review purchase", () => select(p)),
+        button("Preview / Review purchase", () => select(p)),
       );
       $("#products").append(card);
     }

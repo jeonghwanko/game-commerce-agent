@@ -1,11 +1,15 @@
 import { CommerceError, money, requireThat } from "../catalog.js";
+import { eventReference, paypalLinkId } from "../webhook-reference.js";
 export const SANDBOX = "https://api-m.sandbox.paypal.com";
 export class PayPalSandboxProvider {
   name = "paypal-sandbox";
   constructor(config, fetcher = fetch) {
     requireThat((config.baseUrl ?? SANDBOX) === SANDBOX, "sandbox_only");
     requireThat(
-      config.clientId && config.clientSecret && config.webhookId,
+      config.clientId &&
+        config.clientSecret &&
+        config.webhookId &&
+        config.merchantId,
       "paypal_configuration_required",
     );
     const origin = new URL(config.origin);
@@ -80,6 +84,7 @@ export class PayPalSandboxProvider {
             reference_id: o.id,
             custom_id: o.id,
             invoice_id: o.id,
+            payee: { merchant_id: this.config.merchantId },
             amount: { currency_code: o.currency, value: money(o.amount) },
           },
         ],
@@ -108,9 +113,57 @@ export class PayPalSandboxProvider {
       502,
     );
     const unit = d.purchase_units[0];
+    requireThat(
+      d.id === id && d.intent === "CAPTURE",
+      "provider_order_mismatch",
+      502,
+    );
+    requireThat(
+      unit.payee?.merchant_id === this.config.merchantId,
+      "merchant_mismatch",
+      502,
+    );
     const captures = unit.payments?.captures ?? [];
     requireThat(captures.length <= 1, "unexpected_captures", 502);
     const cap = captures[0];
+    if (cap) {
+      requireThat(
+        typeof cap.id === "string" && /^[A-Za-z0-9-]+$/.test(cap.id),
+        "invalid_capture_id",
+        502,
+      );
+      const details = await this.request(`/v2/payments/captures/${cap.id}`);
+      const related = details.supplementary_data?.related_ids?.order_id;
+      const up = details.links?.find((link) => link.rel === "up")?.href;
+      const expectedLinks = [SANDBOX, "https://api.sandbox.paypal.com"].map(
+        (base) => `${base}/v2/checkout/orders/${id}`,
+      );
+      requireThat(
+        details.id === cap.id &&
+          (related === id || (!related && expectedLinks.includes(up))),
+        "capture_order_mismatch",
+        502,
+      );
+      requireThat(
+        !details.payee || details.payee.merchant_id === this.config.merchantId,
+        "merchant_mismatch",
+        502,
+      );
+      requireThat(
+        details.status === cap.status &&
+          details.amount?.value === cap.amount?.value &&
+          details.amount?.currency_code === cap.amount?.currency_code &&
+          cap.amount?.value === unit.amount?.value &&
+          cap.amount?.currency_code === unit.amount?.currency_code,
+        "capture_details_mismatch",
+        502,
+      );
+      requireThat(
+        details.final_capture === true,
+        "partial_capture_not_supported",
+        502,
+      );
+    }
     const amount = cap?.amount ?? unit.amount;
     requireThat(
       /^\d+\.\d{2}$/.test(amount?.value ?? ""),
@@ -133,6 +186,8 @@ export class PayPalSandboxProvider {
       status: d.status,
       captureId: cap?.id,
       captureStatus: cap?.status,
+      merchantId: unit.payee.merchant_id,
+      captureOrderId: cap ? id : undefined,
     };
   }
   async capture(id, localId) {
@@ -144,6 +199,55 @@ export class PayPalSandboxProvider {
       `cap-${localId}`,
     );
     return this.inspect(id);
+  }
+  async eventReference(event) {
+    const ref = eventReference(event);
+    if (event.event_type !== "PAYMENT.CAPTURE.REFUNDED") return ref;
+    const refundId = event.resource?.id;
+    requireThat(
+      typeof refundId === "string" && /^[A-Za-z0-9-]+$/.test(refundId),
+      "invalid_refund_id",
+      502,
+    );
+    const refund = await this.request(`/v2/payments/refunds/${refundId}`);
+    const captureId = paypalLinkId(refund.links, "capture");
+    requireThat(
+      refund.id === refundId &&
+        refund.status === "COMPLETED" &&
+        captureId &&
+        (!ref.captureId || ref.captureId === captureId),
+      "refund_capture_mismatch",
+      502,
+    );
+    const cap = await this.request(`/v2/payments/captures/${captureId}`);
+    const providerId =
+      cap.supplementary_data?.related_ids?.order_id ??
+      paypalLinkId(cap.links, "order");
+    requireThat(
+      cap.id === captureId &&
+        providerId &&
+        (!ref.providerId || ref.providerId === providerId),
+      "capture_order_mismatch",
+      502,
+    );
+    if (cap.payee)
+      requireThat(
+        cap.payee.merchant_id === this.config.merchantId,
+        "merchant_mismatch",
+        502,
+      );
+    const order = await this.request(`/v2/checkout/orders/${providerId}`);
+    requireThat(
+      order.id === providerId &&
+        order.purchase_units?.length === 1 &&
+        order.purchase_units[0].payee?.merchant_id === this.config.merchantId &&
+        order.purchase_units[0].payments?.captures?.some(
+          (c) => c.id === captureId,
+        ),
+      "refund_order_mismatch",
+      502,
+    );
+    return { providerId, captureId };
   }
   async verifyWebhook(headers, event) {
     const keys = [
@@ -170,10 +274,9 @@ export class PayPalSandboxProvider {
       cert.password
     )
       return false;
-    const d = await this.request(
-      "/v1/notifications/verify-webhook-signature",
-      "POST",
-      {
+    requireThat(this.config.webhookBudget, "webhook_budget_required", 503);
+    const d = await this.config.webhookBudget.run(() =>
+      this.request("/v1/notifications/verify-webhook-signature", "POST", {
         auth_algo: headers["paypal-auth-algo"],
         cert_url: headers["paypal-cert-url"],
         transmission_id: headers["paypal-transmission-id"],
@@ -181,7 +284,7 @@ export class PayPalSandboxProvider {
         transmission_time: headers["paypal-transmission-time"],
         webhook_id: this.config.webhookId,
         webhook_event: event,
-      },
+      }),
     );
     return d.verification_status === "SUCCESS";
   }

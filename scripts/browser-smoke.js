@@ -6,11 +6,23 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import { Store } from "../src/store.js";
 import { createApp } from "../src/server.js";
+import { MockProvider } from "../src/providers/mock.js";
 const dir = await mkdtemp(join(tmpdir(), "gca-browser-"));
 const store = new Store();
 const port = Number(process.env.BROWSER_TEST_PORT ?? 3137);
 const origin = `http://127.0.0.1:${port}`;
-const { server } = createApp({ store, origin });
+const provider = new MockProvider(store);
+const originalCapture = provider.capture.bind(provider);
+let failAfterCapture = true;
+provider.capture = async (...args) => {
+  const remote = await originalCapture(...args);
+  if (failAfterCapture) {
+    failAfterCapture = false;
+    throw new Error("simulated response timeout");
+  }
+  return remote;
+};
+const { server, commerce } = createApp({ store, origin, provider });
 await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
 const browser = spawn(
   process.env.CHROMIUM ?? "chromium",
@@ -76,6 +88,25 @@ try {
     targetId,
     flatten: true,
   });
+  await call(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  const screenshot = async (name) => {
+    const metrics = await call("Page.getLayoutMetrics", {}, sessionId);
+    const size = metrics.cssContentSize;
+    const result = await call(
+      "Page.captureScreenshot",
+      {
+        format: "png",
+        captureBeyondViewport: true,
+        clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 },
+      },
+      sessionId,
+    );
+    await writeFile(`/tmp/gca-${name}.png`, Buffer.from(result.data, "base64"));
+  };
   const evaluate = async (expression) => {
     const r = await call(
       "Runtime.evaluate",
@@ -98,12 +129,16 @@ try {
     throw new Error(`UI timeout: ${expression}`);
   };
   const click = async (label) => {
+    await wait("true");
     await evaluate(
       `Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes(${JSON.stringify(label)})).click()`,
     );
   };
   await call("Page.navigate", { url: origin }, sessionId);
   await wait("document.querySelector('#mode')?.textContent.includes('MOCK')");
+  await click("Walk to shop");
+  await wait("scene.near === 'shop'");
+  await click("Talk to Rosalyn");
   await click("Recommend outfits");
   await wait("document.querySelectorAll('.product').length===1");
   await click("Review purchase");
@@ -111,12 +146,41 @@ try {
     "document.querySelector('#quote').textContent.includes('I confirm USD 1.99')",
   );
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
-  await click("I confirm");
+  await screenshot("mock-preview");
+  await evaluate(
+    "{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('I confirm'));b.click();b.click();}",
+  );
   await wait(
     "document.querySelector('#checkout').textContent.includes('Simulate buyer')",
   );
   assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
+  assert.equal(store.get("SELECT count(*) n FROM orders").n, 1);
+  await click("Verify / retry");
+  await wait(
+    "document.querySelector('#status').textContent.includes('buyer_approval_required')",
+  );
+  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
   await click("Simulate buyer");
+  await wait(
+    "document.querySelector('#status').textContent.includes('operation_failed')",
+  );
+  await click("Verify / retry");
+  await wait(
+    "document.querySelector('#status').textContent.includes('Waiting for a verified')",
+  );
+  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
+  await call("Page.reload", {}, sessionId);
+  await wait(
+    "document.querySelector('#status')?.textContent.includes('Waiting for a verified')",
+  );
+  await screenshot("mock-pending");
+  const pendingOrder = store.get("SELECT * FROM orders LIMIT 1");
+  commerce.settle(
+    pendingOrder.id,
+    await provider.inspect(pendingOrder.provider_id),
+    "mock-delayed-webhook",
+  );
+  await click("Refresh verified status");
   await wait(
     "document.querySelector('#wardrobe').textContent.includes('rosalyn-gala')",
   );
@@ -129,26 +193,44 @@ try {
       "Welcome inside",
     ),
   );
-  await click("Find the seal");
+  await click("Walk to courier");
+  await wait("scene.near === 'seal'");
+  await click("Talk to Courier");
+  await click("Accept the seal");
   await wait(
     "document.querySelector('#requirements').textContent.includes('Seal ✓')",
   );
-  await click("Learn the rumor");
+  await click("Walk to archivist");
+  await wait("scene.near === 'rumor'");
+  await click("Talk to Archivist");
+  await click("Remember the rumor");
   await wait(
     "document.querySelector('#guard').textContent.includes('Welcome inside')",
   );
+  await click("Walk to guard");
+  await wait("scene.near === 'guard'");
+  await click("Talk to Gatekeeper");
+  await wait(
+    "document.querySelector('#dialogue-text').textContent.includes('gate is open')",
+  );
+  await evaluate("scene.target={x:900,y:235}");
+  await wait("scene.arrived === true");
+  await screenshot("mock-complete");
   await call("Page.reload", {}, sessionId);
   await wait(
     "document.querySelector('#guard')?.textContent.includes('Welcome inside')",
   );
-  const screenshot = await call(
+  await click("Walk to shop");
+  await wait("scene.near === 'shop'");
+  await click("Talk to Rosalyn");
+  const screenResult = await call(
     "Page.captureScreenshot",
     { format: "png", captureBeyondViewport: true },
     sessionId,
   );
   await writeFile(
     "/tmp/gca-browser-smoke.png",
-    Buffer.from(screenshot.data, "base64"),
+    Buffer.from(screenResult.data, "base64"),
   );
   // Second SKU exercises cancellation through actual rendered controls.
   await evaluate(
@@ -171,8 +253,43 @@ try {
     "document.querySelector('#status').textContent.includes('CANCELLED')",
   );
   assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 1);
+  const cancelled = store.get("SELECT id FROM orders WHERE status='CANCELLED'");
+  await call(
+    "Page.navigate",
+    { url: `${origin}/?order=${cancelled.id}&result=approved` },
+    sessionId,
+  );
+  await wait(
+    "document.querySelector('#status')?.textContent.includes('CANCELLED')",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('#checkout').children.length"),
+    0,
+  );
+  // A fresh browser session finishes the story entirely for free.
+  await call("Network.clearBrowserCookies", {}, sessionId);
+  await call("Page.navigate", { url: origin }, sessionId);
+  await wait("document.querySelector('#mode')?.textContent.includes('MOCK')");
+  await click("Walk to shop");
+  await wait("scene.near === 'shop'");
+  await click("Talk to Rosalyn");
+  await click("Borrow formal clothes");
+  await click("Walk to courier");
+  await wait("scene.near === 'seal'");
+  await click("Talk to Courier");
+  await click("Accept the seal");
+  await click("Walk to archivist");
+  await wait("scene.near === 'rumor'");
+  await click("Talk to Archivist");
+  await click("Remember the rumor");
+  await click("Walk to guard");
+  await wait("scene.near === 'guard'");
+  await click("Talk to Gatekeeper");
+  await evaluate("scene.target={x:900,y:235}");
+  await wait("scene.arrived === true");
+  assert.equal(store.get("SELECT count(*) n FROM orders").n, 2);
   console.log(
-    "PASS Chromium: recommendation, explicit confirmation, mock approval, wardrobe, all guard conditions, reload, cancellation. Screenshot: /tmp/gca-browser-smoke.png",
+    "PASS Chromium: playable courtyard, preview, repeated confirmation, approval required, timeout retry, pending webhook, reload, outfit and NPC changes, cancellation return, complete free route. Screenshot: /tmp/gca-browser-smoke.png",
   );
 } finally {
   socket?.close();

@@ -26,6 +26,8 @@ export interface ProviderOrder {
   status: string;
   captureId?: string;
   captureStatus?: string;
+  merchantId?: string;
+  captureOrderId?: string;
 }
 export interface PaymentProvider {
   name: ProviderName;
@@ -60,4 +62,27 @@ export interface CommerceEvent {
 }
 export interface EventSink {
   accept(event: CommerceEvent): Promise<void>;
+}
+/** Only a host-owned authentication verifier may construct this value. */
+export interface VerifiedPrincipal {
+  authenticated: true;
+  issuer: string;
+  subject: string;
+  expiresAt: number;
+  csrfToken: string;
+}
+export interface PrincipalVerifier {
+  (
+    request: import("node:http").IncomingMessage,
+  ): Promise<VerifiedPrincipal | null>;
+}
+export interface GoalPlan {
+  goal: "guard" | "travel" | "outfit" | "unsupported";
+  strategy: "use_owned" | "use_free" | "no_purchase" | "consider_purchase";
+  actions: Array<{
+    type: "equip" | "borrow" | "quest" | "review_purchase" | "no_purchase";
+    label: string;
+    sku?: string;
+    quest?: "seal" | "rumor";
+  }>;
 }
