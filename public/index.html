@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Rosalyn’s Atelier · Game Commerce Agent</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <span class="brand">GCA / PLAYABLE COMMERCE</span
+      ><span id="mode">Connecting…</span>
+    </header>
+    <main>
+      <section class="intro">
+        <p class="eyebrow">ONE SHOP. YOUR CHOICE.</p>
+        <h1>A disguise begins<br />with a conversation.</h1>
+        <p>Rosalyn’s Atelier · an independent game fixture</p>
+        <div class="scene" aria-label="Original illustrated boutique">
+          <div class="window"></div>
+          <div class="outfit">♜</div>
+          <div class="counter">ROSALYN’S ATELIER</div>
+          <span class="lamp">✦</span>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Ask Rosalyn</h2>
+        <p>Tell me your goal and budget. Buying is always optional.</p>
+        <p id="ai-notice"></p>
+        <form id="recommend">
+          <label for="goal">Your goal</label
+          ><textarea id="goal" maxlength="500" required>
+I need formal clothes to get past the guard.</textarea
+          ><label for="budget">Budget in USD</label
+          ><input
+            id="budget"
+            type="number"
+            min="0"
+            max="1000"
+            step="0.01"
+            value="3.00"
+            required
+          /><button>Recommend outfits</button>
+        </form>
+        <div id="products"></div>
+        <p id="alternative">
+          Free route: borrow formal clothes, find a seal, and learn the rumor.
+        </p>
+      </section>
+      <section class="panel">
+        <h2>Purchase confirmation</h2>
+        <div id="quote">
+          Select an outfit to see its exact price and contents.
+        </div>
+        <div id="checkout"></div>
+        <p id="status" role="status" aria-live="polite"></p>
+      </section>
+      <section class="panel">
+        <h2>Wardrobe & the gate</h2>
+        <div id="wardrobe"></div>
+        <div class="quests">
+          <button data-quest="borrowed">Borrow formal clothes · Free</button
+          ><button data-quest="seal">Find the seal · Free</button
+          ><button data-quest="rumor">Learn the rumor · Free</button>
+        </div>
+        <p id="guard"></p>
+        <p id="requirements"></p>
+      </section>
+      <section class="panel wide">
+        <h2>Your session’s funnel</h2>
+        <p>
+          Only event names and pseudonymous IDs are stored. No conversation,
+          payment details or email enters analytics.
+        </p>
+        <div id="funnel"></div>
+      </section>
+    </main>
+    <footer>
+      Sandbox only. Original demo content. No real money. AI never approves a
+      purchase.
+    </footer>
+  </body>
+</html>
