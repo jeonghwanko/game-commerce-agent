@@ -8,6 +8,7 @@ export const AI_COST_POLICY = {
   maxRequestBytes: 16000,
   maxOutputTokens: 250,
   inputUsdPerMillion: 0.4,
+  cachedInputUsdPerMillion: 0.1,
   outputUsdPerMillion: 1.6,
   reviewed: "2026-10-15",
   reviewExpires: "2026-10-22T00:00:00Z",
@@ -16,7 +17,12 @@ export const AI_COST_POLICY = {
  * UTF-8 byte bound plus 1024 framing tokens is conservative for this text-only API.
  * Same DB/name in HTTP and CLI. No automatic refunds, retries or fallback models.
  */
-export function costLimitedFetch(store, fetcher = fetch, now = Date.now) {
+export function costLimitedFetch(
+  store,
+  fetcher = fetch,
+  now = Date.now,
+  { onReserve } = {},
+) {
   const budget = new ExternalWorkBudget(store, {
     name: "ai-usd5-v1",
     limit: 100,
@@ -36,12 +42,14 @@ export function costLimitedFetch(store, fetcher = fetch, now = Date.now) {
         b.tool_choice === "none" &&
         !b.tools &&
         !b.stream &&
+        (b.service_tier === undefined || b.service_tier === "default") &&
         bytes <= 16000,
       "ai_cost_policy_violation",
     );
     const upper = ((bytes + 1024) * 0.4 + 250 * 1.6) / 1e6;
     requireThat(upper <= 0.05, "ai_cost_policy_violation");
     return budget.run(async () => {
+      onReserve?.();
       const signal = options.signal ?? AbortSignal.timeout(15000);
       const response = await fetcher(url, { ...options, signal });
       const data = await consumeJSON(response, signal);
@@ -56,6 +64,7 @@ export function costLimitedFetch(store, fetcher = fetch, now = Date.now) {
 
 // The reservation covers headers, bounded body consumption, parsing and cancellation.
 async function consumeJSON(response, signal) {
+  if (!response.ok && response.body === null) return null;
   requireThat(
     response.body && typeof response.body.getReader === "function",
     "invalid_ai_response",
@@ -84,6 +93,7 @@ async function consumeJSON(response, signal) {
       requireThat(bytes <= 65536, "ai_response_too_large", 502);
       chunks.push(Buffer.from(part.value));
     }
+    if (!response.ok) return null;
     try {
       return JSON.parse(Buffer.concat(chunks).toString("utf8"));
     } catch {

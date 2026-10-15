@@ -11,7 +11,10 @@ export function scoreIntent(c, result) {
     !actual ||
     !sameSet(actual.goals, expected.goals) ||
     !sameSet(actual.avoidStyles, expected.avoidStyles) ||
-    ["style", "spending", "clarify"].some((k) => actual[k] !== expected[k])
+    ![...(c.gold.acceptedIntentStyles ?? [expected.style])].includes(
+      actual.style,
+    ) ||
+    ["spending", "clarify"].some((k) => actual[k] !== expected[k])
   )
     errors.push("interpretation");
   if (result.plan.strategy !== c.gold.strategy) errors.push("strategy");

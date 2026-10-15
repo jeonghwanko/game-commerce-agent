@@ -1,104 +1,99 @@
-// Default is a zero-network preflight. Only run --live after configuration is confirmed.
+// Zero-network preflight by default. --live still requires explicit configuration readiness.
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  mkdirSync,
+  openSync,
+  writeFileSync,
+  fsyncSync,
+  closeSync,
+} from "node:fs";
+import { join } from "node:path";
 import { Store } from "../src/store.js";
 import { Recommender } from "../src/recommend.js";
-import { AI_MODEL, AI_COST_POLICY, costLimitedFetch } from "../src/ai-cost.js";
+import { AI_MODEL, costLimitedFetch } from "../src/ai-cost.js";
+import { typedAIError } from "../src/ai-telemetry.js";
 import {
-  intentCases,
-  evaluationComposition,
-} from "../fixtures/intent-evaluation.js";
-import { scoreIntent } from "../fixtures/score-intent.js";
-import { catalog } from "../src/catalog.js";
+  requireEvaluationReadiness,
+  evaluationManifest,
+  runEvaluation,
+} from "../src/ai-evaluation.js";
+const root = fileURLToPath(new URL("../", import.meta.url));
 const live = process.argv.includes("--live");
-console.log(
-  JSON.stringify({
-    mode: live ? "live" : "dry-run",
-    cases: intentCases.length,
-    composition: evaluationComposition,
-    model: AI_MODEL,
-    policy: AI_COST_POLICY,
-    modelEvaluationPerformed: false,
-  }),
-);
-if (live) {
-  if (
-    process.env.EVAL_CONFIGURATION_READY !== "true" ||
-    !process.env.OPENAI_API_KEY ||
-    !process.env.DATABASE_PATH
-  )
-    throw new Error(
-      "parent_configuration_confirmation_and_persistent_DATABASE_PATH_required",
-    );
-  const store = new Store(process.env.DATABASE_PATH);
-  const r = new Recommender({
-    mode: "openai",
-    key: process.env.OPENAI_API_KEY,
-    model: AI_MODEL,
-    fetcher: costLimitedFetch(store),
-  });
-  let correct = 0,
-    violations = 0,
-    failures = 0;
-  const bySplit = {
-    regression: { cases: 0, correct: 0, failures: 0 },
-    holdout: { cases: 0, correct: 0, failures: 0 },
-  };
-  try {
-    for (const c of intentCases) {
-      bySplit[c.split].cases++;
-      try {
-        const result = await r.recommend(c, c.context);
-        const { match, errors } = scoreIntent(c, result);
-        correct += Number(match);
-        bySplit[c.split].correct += Number(match);
-        violations += Number(
-          errors.some((e) =>
-            ["commerce_invariant", "ownership", "forbidden_style"].includes(e),
-          ) ||
-            result.products.some(
-              (p) =>
-                !catalog.some((x) => JSON.stringify(x) === JSON.stringify(p)) ||
-                p.amount > c.budgetMinor ||
-                c.context.owned.includes(p.sku),
-            ),
-        );
-        console.log(
-          JSON.stringify({
-            category: c.category,
-            state: c.state,
-            match,
-            errors,
-            split: c.split,
-            strategy: result.plan.strategy,
-          }),
-        );
-      } catch {
-        failures++;
-        bySplit[c.split].failures++;
-        console.log(
-          JSON.stringify({
-            category: c.category,
-            state: c.state,
-            error: "evaluation_request_failed",
-          }),
-        );
-      }
-    }
-    console.log(
-      JSON.stringify({
-        modelEvaluationPerformed: true,
-        cases: intentCases.length,
-        correct,
-        bySplit,
-        violations,
-        failures,
-        reservedAttempts: store.get(
-          "SELECT used FROM external_budgets WHERE name='ai-usd5-v1'",
-        ).used,
-      }),
-    );
-    if (violations || failures || correct !== intentCases.length)
-      process.exitCode = 1;
-  } finally {
-    store.close();
+let store, fd, manifest;
+let executionStarted = false;
+const emit = (record) => {
+  const line = JSON.stringify(record) + "\n";
+  if (fd !== undefined) {
+    writeFileSync(fd, line);
+    fsyncSync(fd);
   }
+  process.stdout.write(line);
+};
+try {
+  const git = (...args) =>
+    execFileSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  manifest = evaluationManifest({
+    commit: git("rev-parse", "HEAD"),
+    dirty: git("status", "--porcelain").length > 0,
+    mode: live ? "live" : "dry-run",
+  });
+  if (!live)
+    emit({
+      kind: "preflight",
+      timestamp: new Date().toISOString(),
+      ...manifest,
+      modelEvaluationPerformed: false,
+      externalCalls: 0,
+    });
+  else {
+    const directory = join(root, "data", "evaluations");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    fd = openSync(join(directory, manifest.runId + ".jsonl"), "wx", 0o600);
+    requireEvaluationReadiness({
+      dirty: manifest.dirty,
+      ready: process.env.EVAL_CONFIGURATION_READY === "true",
+      keyPresent: !!process.env.OPENAI_API_KEY,
+      databasePresent: !!process.env.DATABASE_PATH,
+    });
+    // Do not infer readiness from a host/secret announcement in another environment.
+    store = new Store(process.env.DATABASE_PATH);
+    let reservations = 0;
+    const recommender = new Recommender({
+      mode: "openai",
+      key: process.env.OPENAI_API_KEY,
+      model: AI_MODEL,
+      fetcher: costLimitedFetch(store, fetch, Date.now, {
+        onReserve: () => reservations++,
+      }),
+    });
+    executionStarted = true;
+    const summary = await runEvaluation({
+      recommender,
+      manifest,
+      emit,
+      reservationCount: () => reservations,
+      lifetimeReservations: () =>
+        store.get("SELECT used FROM external_budgets WHERE name='ai-usd5-v1'")
+          .used,
+    });
+    if (!summary.passed) process.exitCode = 1;
+  }
+} catch (e) {
+  emit({
+    kind: "setup_or_recording_error",
+    timestamp: new Date().toISOString(),
+    ...(manifest ?? {}),
+    error: typedAIError(e),
+    modelEvaluationPerformed: executionStarted ? null : false,
+    outcomeIncomplete: executionStarted,
+  });
+  process.exitCode = 1;
+} finally {
+  if (fd !== undefined) closeSync(fd);
+  store?.close();
 }

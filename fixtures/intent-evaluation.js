@@ -246,3 +246,39 @@ export const evaluationComposition = {
   holdout: { sentences: 8, cases: 8 },
   total: 44,
 };
+
+// Versioned, frozen BEFORE any paid request. Expectations never come from the planner.
+export const GOLD_VERSION = "intent-gold-v2";
+export const compatibilityCase = {
+  id: "compatibility/story-free-v1",
+  split: "compatibility",
+  category: "compatibility",
+  state: "new",
+  goal: "Help me enter the gathering without buying anything.",
+  budgetMinor: 300,
+  context: baseContext,
+  expectedIntent: intent(["story"], "any", "free"),
+  gold: {
+    ...freeStory[0],
+    acceptedIntentStyles: ["any", "unspecified", "formal"],
+  },
+};
+for (const c of intentCases) {
+  c.id = `${c.split}/${c.category}/${c.state}`;
+  // Explicit gold equivalence only for these neutral story-only sentences.
+  if (["synonym", "korean", "spanish", "korean-holdout"].includes(c.category))
+    c.gold = {
+      ...c.gold,
+      acceptedIntentStyles: ["any", "unspecified", "formal"],
+    };
+}
+const freeze = (value) => {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.values(value).forEach(freeze);
+    Object.freeze(value);
+  }
+  return value;
+};
+freeze(intentCases);
+freeze(compatibilityCase);
+freeze(evaluationComposition);
