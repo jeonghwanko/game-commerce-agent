@@ -18,14 +18,14 @@ npm start
 
 Default `PAYMENT_PROVIDER=mock` and `AI_PROVIDER=mock` are entirely offline. “Simulate buyer approval + verified webhook” is explicitly a simulation. No credentials, payment, external AI, or account creation is needed. The deterministic mock recommender is **not a real LLM**.
 
-1. Click the courtyard or use WASD / arrow keys to approach the shop; press E to talk. Accessible “Walk to…” controls move the same character.
-2. Ask for a goal with a USD budget. The server plan distinguishes owned clothes, free borrowing, no purchase and a suitable optional purchase.
-3. Preview the violet coat with gold embroidery or teal cloak. Review the exact server quote and explicitly confirm it.
-4. Simulate buyer approval and verified webhook in mock mode. Equip the outfit and see the character change.
-5. Talk to the courier for the seal and the archivist for the rumor. The gatekeeper requires formal clothes **and** both free quests.
-6. Walk through the open gate. A new player can finish by borrowing the plain formal outfit without creating any order. The optional evidence panel is collapsed during play.
+1. Enter a goal such as “I want to go to the gathering.” (The mock also recognizes “무도회에 가고 싶어”.)
+2. Choose **Borrow for free** or **Find a look to buy**. A suitable owned outfit replaces borrowing with **Wear what I own**.
+3. Preview first. No ownership, equipment or quest flag changes until an explicit confirmation. The paid preview names the exact product, USD amount and currency.
+4. Confirm the free loan/owned outfit, or confirm the optional purchase and use **Complete mock payment**. Choose Wear after a completed purchase.
+5. In the courtyard, collect the free seal and password, then enter. Payment never skips these quests.
+6. Reload in the same unexpired session to restore wardrobe and quest progress. Movement and typed goals are not saved.
 
-The gathering comparison shows additional cost, owned/free/optional status, budget fit and remaining free quests. Preview Gala, Traveler or the free loan to see conditional Rosalyn/Gatekeeper reactions without creating an order or changing a quest. Plans offer NPC directions; the server-loaded progress panel makes same-session recovery visible. See the [English submission draft](docs/submission-draft.md) and [2:45 rehearsal script](docs/demo-script.md).
+Only one main stage is visible at a time. Budget, full comparison, authored NPC explanations, wardrobe details and evidence are collapsed until requested. The short preview shows current ownership, cost and remaining conditions. [English draft](docs/submission-draft.md) · [2:45 rehearsal](docs/demo-script.md).
 
 The server listens on loopback only. This is an isolated Sandbox prototype, not a deployed shop. The anonymous, server-issued HttpOnly cookie represents a demo player. The same unexpired cookie restores server state after reload/restart; this is not account login or cross-device recovery. The implemented `AuthenticatedPrincipalAdapter` instead consumes a host-verified stable principal on every request and restores rights across host re-logins. It does not verify tokens itself or connect to a private authentication DB. Production startup rejects anonymous mode. See [the contracts](docs/contracts.md).
 

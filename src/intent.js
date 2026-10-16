@@ -78,9 +78,10 @@ export function offlineIntent(goal) {
       return true;
     })
     .join(" ");
-  const story = /guard|gate|gathering|enter|manor|경비|저택|입장|모임/.test(
-    positive,
-  );
+  const story =
+    /guard|gate|gathering|enter|manor|경비|저택|입장|모임|무도회/.test(
+      positive,
+    );
   const formal = /formal|gala|violet|gold embroidery|정장|보라/.test(positive);
   const cloak = /travel|cloak|teal|망토|청록/.test(positive);
   const collection =

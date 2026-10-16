@@ -8,7 +8,7 @@
 
 A player wants to enter an evening gathering. The gatekeeper needs formal clothes, an invitation seal, and a password. A sales-only chatbot might immediately suggest buying a coat. Rosalyn instead makes the choices and consequences visible.
 
-The comparison uses the player's server-owned wardrobe, quest state and stated budget. An owned outfit has zero additional cost. A plain formal loan is free and meets the same dress requirement as the Gala coat. The optional violet coat costs USD 1.99; the teal cloak costs USD 0.99 and does not meet the formal dress requirement. These are catalog prices, not claimed savings. Over-budget and already-owned options remain distinguishable from recommended purchases.
+The main screen offers a free or already-owned path and an optional purchase path. Detailed comparisons are collapsed until requested. The comparison uses the player's server-owned wardrobe, quest state and stated budget. An owned outfit has zero additional cost. A plain formal loan is free and meets the same dress requirement as the Gala coat. The optional violet coat costs USD 1.99; the teal cloak costs USD 0.99 and does not meet the formal dress requirement. These are catalog prices, not claimed savings. Over-budget and already-owned options remain distinguishable from recommended purchases.
 
 Before any purchase, the player can compare the appearances and read Rosalyn's and the gatekeeper's conditional reactions. The two paid looks and free loan have distinct original vector designs. The preview explains what would change and what would remain required. It creates no quote, order, entitlement or quest reward. Buying a cosmetic never supplies the seal or password. Free borrowing can finish the same story.
 

@@ -156,7 +156,7 @@ try {
   const click = async (label) => {
     await wait("true");
     const point = await evaluate(
-      `(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes(${JSON.stringify(label)}) && !b.disabled && b.getClientRects().length); if(!b)throw new Error('Missing button '+${JSON.stringify(label)});b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+      `(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes(${JSON.stringify(label)}) && !b.disabled && b.checkVisibility()); if(!b)throw new Error('Missing button '+${JSON.stringify(label)});b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
     );
     await call(
       "Input.dispatchMouseEvent",
@@ -207,365 +207,299 @@ try {
     await typeInput("#goal", text);
     await typeInput("#budget", budget);
   };
-  const reflow = async (stage) => {
-    await evaluate("document.documentElement.style.zoom='2'");
-    assert.ok(
-      await evaluate("document.documentElement.scrollWidth<=innerWidth"),
-      stage + " page overflow",
-    );
-    const overflow = await evaluate(
-      `Array.from(document.querySelectorAll('button,input,textarea,a.action')).filter(b=>b.getClientRects().length).filter(b=>{const r=b.getBoundingClientRect();return r.left < -1 || r.right>innerWidth+1;}).map(b=>b.textContent||b.id)`,
-    );
-    assert.deepEqual(overflow, [], stage + " control overflow");
-    await screenshot("mobile-200-" + stage);
+  const act = async (label) => {
+    await click(label);
+    await wait("true");
   };
-  const desktopShot = async (name) => {
-    await evaluate("document.documentElement.style.zoom='1'");
-    await call(
-      "Emulation.setDeviceMetricsOverride",
-      { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false },
-      sessionId,
+  const pointer = async (selector) => {
+    await wait("true");
+    const p = await evaluate(
+      `(() => { const e=document.querySelector(${JSON.stringify(selector)}); if(!e?.checkVisibility())throw Error('Hidden control'); e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
     );
-    await screenshot(name);
-    if (name === "mock-preview") {
-      for (const [id, file] of [
-        ["comparison", "comparison-panel"],
-        ["purchase-panel", "npc-preview-panel"],
-      ]) {
-        const clip = await evaluate(
-          `(() => { const r=document.getElementById('${id}').getBoundingClientRect(); return {x:r.x+scrollX,y:r.y+scrollY,width:r.width,height:r.height,scale:1}; })()`,
-        );
-        const shot = await call(
-          "Page.captureScreenshot",
-          { format: "png", captureBeyondViewport: true, clip },
-          sessionId,
-        );
-        await writeFile(
-          `/tmp/gca-${file}.png`,
-          Buffer.from(shot.data, "base64"),
-        );
+    for (const type of ["mousePressed", "mouseReleased"])
+      await call(
+        "Input.dispatchMouseEvent",
+        { type, button: "left", clickCount: 1, ...p },
+        sessionId,
+      );
+    await wait("true");
+  };
+  const key = async (key, modifiers = 0) => {
+    for (const type of ["keyDown", "keyUp"])
+      await call(
+        "Input.dispatchKeyEvent",
+        {
+          type,
+          key,
+          code: key,
+          modifiers,
+          text: type === "keyDown" && key === "Enter" ? "\r" : undefined,
+          windowsVirtualKeyCode: key === "Tab" ? 9 : 13,
+        },
+        sessionId,
+      );
+  };
+  const tabTo = async (selector) => {
+    for (let i = 0; i < 100; i++) {
+      await wait("true");
+      if (
+        await evaluate(
+          `document.activeElement===document.querySelector(${JSON.stringify(selector)})`,
+        )
+      ) {
+        await key("Enter");
+        await wait("true");
+        return;
       }
+      const reverse = await evaluate(
+        `!!(document.activeElement.compareDocumentPosition(document.querySelector(${JSON.stringify(selector)}))&2)`,
+      );
+      await key("Tab", reverse ? 8 : 0);
     }
-    await call(
+    throw Error("Keyboard unreachable: " + selector);
+  };
+  const tabButton = async (label) => {
+    const selector = await evaluate(
+      `(() => { const all=[...document.querySelectorAll('button')];const b=all.find(e=>e.textContent.includes(${JSON.stringify(label)})&&e.checkVisibility()&&!e.disabled); if(!b)throw Error('Missing keyboard button');return 'button[data-test-index="'+all.indexOf(b)+'"]';})()`,
+    );
+    // Test identifiers do not change product state, focus or activation.
+    await evaluate(
+      "document.querySelectorAll('button').forEach((b,i)=>b.dataset.testIndex=i)",
+    );
+    await tabTo(selector);
+  };
+  const layout = async () => {
+    assert.equal(
+      await evaluate("document.documentElement.scrollWidth<=innerWidth+1"),
+      true,
+    );
+    assert.deepEqual(
+      await evaluate(
+        "[...document.querySelectorAll('button,input,canvas')].filter(e=>e.checkVisibility()).filter(e=>{const r=e.getBoundingClientRect();return r.left< -1||r.right>innerWidth+1}).map(e=>e.id||e.textContent)",
+      ),
+      [],
+    );
+    assert.equal(
+      await evaluate(
+        "['shop','purchase','world'].filter(n=>!document.getElementById(n+'-panel').hidden).length",
+      ),
+      1,
+      "one main stage at a time",
+    );
+  };
+  const viewport = async (width, height = 900) =>
+    call(
       "Emulation.setDeviceMetricsOverride",
-      { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
+      { width, height, deviceScaleFactor: 1, mobile: width === 390 },
       sessionId,
     );
-    await evaluate("document.documentElement.style.zoom='2'");
+  const goal = async (text, budget) => {
+    if (await evaluate("!document.getElementById('purchase-panel').hidden"))
+      await pointer("#back-preview");
+    if (await evaluate("!document.getElementById('world-panel').hidden"))
+      await pointer("#switch-view");
+    if (await evaluate("document.getElementById('recommend').hidden"))
+      await pointer("#change-goal");
+    if (!(await evaluate("document.getElementById('budget-details').open")))
+      await pointer("#budget-details summary");
+    await typeGoal(text, budget);
+    await act("Show my choices");
+    assert.equal(
+      await evaluate("document.querySelectorAll('#choices>button').length"),
+      2,
+    );
+    assert.equal(
+      await evaluate("document.getElementById('plan-details').open"),
+      false,
+    );
+    await layout();
   };
+  const travel = async (place, walkLabel, talkLabel, keyboard = false) => {
+    if (await evaluate("document.getElementById('world-panel').hidden"))
+      await pointer("#switch-view");
+    if (!(await evaluate("document.getElementById('travel-details').open")))
+      keyboard
+        ? await tabTo("#travel-details summary")
+        : await pointer("#travel-details summary");
+    keyboard ? await tabButton(walkLabel) : await act(walkLabel);
+    await wait(`scene.near===${JSON.stringify(place)}`);
+    keyboard ? await tabButton(talkLabel) : await act(talkLabel);
+  };
+  const completeStory = async (keyboard = false) => {
+    for (const [place, walkLabel, talkLabel, accept] of [
+      ["seal", "Walk to courier", "Talk to Courier", "Accept the seal"],
+      ["rumor", "Walk to archivist", "Talk to Archivist", "Remember the rumor"],
+    ]) {
+      await travel(place, walkLabel, talkLabel, keyboard);
+      keyboard ? await tabButton(accept) : await act(accept);
+    }
+    await travel("guard", "Walk to guard", "Talk to Gatekeeper", keyboard);
+    keyboard
+      ? await tabButton("Enter the gathering")
+      : await act("Enter the gathering");
+    await wait("scene.arrived===true");
+  };
+  const snapshot = () =>
+    JSON.stringify(
+      ["game", "orders", "entitlements"].map((t) =>
+        store.all(`SELECT * FROM ${t}`),
+      ),
+    );
   await call("Page.navigate", { url: origin }, sessionId);
-  await wait("!document.querySelector('#global-error').hidden");
-  assert.equal(
-    await evaluate("document.querySelector('[data-walk]').disabled"),
-    true,
-  );
-  await reflow("session-error");
-  await click("Retry connection");
-  await wait("document.querySelector('#mode')?.textContent.includes('MOCK')");
-  await click("Walk to shop");
-  await wait("scene.near === 'shop'");
-  await click("Talk to Rosalyn");
-  await reflow("open-shop-form");
-  await typeGoal("enter the evening gathering", "3.00");
-  await click("Recommend outfits");
-  await wait("document.querySelectorAll('.product').length===1");
+  await wait("!document.getElementById('global-error').hidden");
+  await act("Restore saved progress");
+  await viewport(1280);
+  await goal("무도회에 가고 싶어", "3.00");
   assert.match(
-    await evaluate("document.querySelector('.plan-context').textContent"),
-    /Budget: USD 3.00.*Owned collection: none/,
+    await evaluate("document.getElementById('choices').textContent"),
+    /Borrow for free.*Find a look to buy/,
   );
-  await click("Visit the courier · Free");
-  await wait("scene.near === 'seal'");
-  assert.equal(await evaluate("document.activeElement.id"), "world");
-  assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
-  await click("Walk to shop");
-  await wait("scene.near === 'shop'");
-  await click("Talk to Rosalyn");
-  const previewState = JSON.stringify(store.all("SELECT * FROM game"));
-  await click("Compare Rosalyn Gala Outfit");
-  await wait(
-    "document.querySelector('#look-reactions').textContent.includes('gold star embroidery')",
-  );
+  await screenshot("simple-desktop-choices");
+  const before = snapshot();
+  await act("Borrow for free");
+  assert.equal(snapshot(), before, "choosing free only previews");
   assert.match(
-    await evaluate("document.querySelector('#look-reactions').textContent"),
-    /Gatekeeper:.*free invitation seal.*free password quest/,
+    await evaluate("document.getElementById('quote').textContent"),
+    /USD 0.00.*Confirm free loan/,
   );
-  await click("Preview Traveler’s Cloak only");
-  await wait("previewSku === 'rosalyn-traveler'");
-  assert.match(
-    await evaluate("document.querySelector('#look-reactions').textContent"),
-    /Rosalyn:.*teal cloak/,
-  );
-  assert.match(
-    await evaluate("document.querySelector('#look-reactions').textContent"),
-    /Gatekeeper:.*formal clothes.*free invitation seal.*free password quest/,
-  );
-  assert.equal(
-    await evaluate("document.querySelector('#checkout').children.length"),
-    0,
-  );
-  await click("Preview Plain formal loan only");
-  await wait("previewSku === 'borrowed'");
-  assert.match(
-    await evaluate("document.querySelector('#look-reactions').textContent"),
-    /same dress check as Gala, for free/,
-  );
-  assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
+  await pointer("#look-details summary");
+  await act("Preview Traveler’s Cloak only");
+  assert.equal(snapshot(), before);
+  await pointer("#look-details summary");
+  await act("Preview Rosalyn Gala Outfit only");
+  assert.equal(snapshot(), before);
   assert.equal(store.get("SELECT count(*) n FROM quotes").n, 0);
-  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
+  await pointer("#back-preview");
+  await act("Find a look to buy");
+  await act("Preview / Review purchase");
+  assert.equal(snapshot(), before, "paid quote does not purchase or equip");
+  await viewport(390, 844);
+  await layout();
   assert.equal(
-    JSON.stringify(store.all("SELECT * FROM game")),
-    previewState,
-    "three previews cannot change quests or equipment",
+    await evaluate("document.getElementById('look-details').open"),
+    false,
   );
-  await click("Review purchase");
+  await screenshot("simple-mobile-preview");
+  await act("I confirm");
   await wait(
-    "document.querySelector('#quote').textContent.includes('I confirm USD 1.99')",
-  );
-  assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
-  assert.match(
-    await evaluate("document.querySelector('#preview-caption').textContent"),
-    /Rosalyn Gala Outfit/,
-  );
-  assert.equal(
-    await evaluate(
-      "document.querySelector('#preview').toDataURL() !== document.querySelector('#loan-preview').toDataURL()",
-    ),
-    true,
-    "paid and free previews are visibly different",
-  );
-  assert.equal(
-    await evaluate("scene.state.equipped"),
-    null,
-    "preview cannot equip or grant",
-  );
-  await reflow("quote");
-  await desktopShot("mock-preview");
-  await click("I confirm");
-  await wait(
-    "document.querySelector('#status').textContent.includes('operation_failed')",
+    "document.getElementById('error-code').textContent==='operation_failed'",
   );
   assert.equal(
     store.get("SELECT status FROM orders LIMIT 1").status,
     "CREATING",
   );
-  await reflow("create-error");
   await call("Page.reload", {}, sessionId);
   await wait(
-    "document.querySelector('#checkout').textContent.includes('Resume confirmed purchase')",
+    "document.getElementById('checkout').textContent.includes('Resume confirmed purchase')",
   );
-  await reflow("creating-recovery");
-  await click("Resume confirmed purchase");
-
-  await wait(
-    "document.querySelector('#checkout').textContent.includes('Simulate buyer')",
-  );
-  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
+  await layout();
+  await act("Resume confirmed purchase");
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 1);
-  await reflow("approval-pending");
-  await click("Preview Traveler’s Cloak only");
-  await wait("previewSku === 'rosalyn-traveler'");
+  await pointer("#look-details summary");
+  await act("Preview Traveler’s Cloak only");
   assert.equal(
-    await evaluate("document.querySelector('#checkout').children.length"),
+    await evaluate("document.getElementById('checkout').children.length"),
     0,
   );
-  await click("Return to pending purchase");
-  await wait("previewSku === 'rosalyn-gala'");
+  await act("Return to pending purchase");
   assert.match(
-    await evaluate("document.querySelector('#quote').textContent"),
-    /Rosalyn Gala Outfit.*USD 1.99/,
+    await evaluate("document.getElementById('quote').textContent"),
+    /USD 1.99/,
   );
-  await click("Walk to shop");
-  await wait("scene.near === 'shop'");
-  await click("Talk to Rosalyn");
-  // Regression: selecting another quote must detach all previous payment controls.
-  await typeGoal("travel cloak", "1.00");
-  await click("Recommend outfits");
-  await wait(
-    "document.querySelector('#products').textContent.includes('Traveler')",
-  );
-  await click("Review purchase");
-  await wait(
-    "document.querySelector('#quote').textContent.includes('USD 0.99')",
+  await goal("travel cloak", "1.00");
+  await act("Find a look to buy");
+  await act("Preview / Review purchase");
+  assert.match(
+    await evaluate("document.getElementById('quote').textContent"),
+    /USD 0.99/,
   );
   assert.equal(
-    await evaluate("document.querySelector('#checkout').children.length"),
+    await evaluate("document.getElementById('checkout').children.length"),
     0,
-    "new quote retains old order payment buttons",
   );
-  await click("Return to pending purchase");
+  await act("Return to pending purchase");
+  await act("Retry payment check");
   await wait(
-    "document.querySelector('#quote').textContent.includes('USD 1.99')",
+    "document.getElementById('error-code').textContent==='buyer_approval_required'",
   );
-  assert.equal(
-    await evaluate("document.querySelector('#checkout').dataset.orderId"),
-    store.get("SELECT id FROM orders LIMIT 1").id,
-  );
-  await click("Retry payment check");
+  await act("Complete mock payment");
   await wait(
-    "document.querySelector('#status').textContent.includes('buyer_approval_required')",
+    "document.getElementById('error-code').textContent==='operation_failed'",
   );
-  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
-  await click("Simulate buyer");
+  await act("Retry payment check");
   await wait(
-    "document.querySelector('#status').textContent.includes('operation_failed')",
-  );
-  await click("Retry payment check");
-  await wait(
-    "document.querySelector('#status').textContent.includes('Waiting for a verified')",
+    "document.getElementById('status').textContent.includes('Waiting for a verified')",
   );
   assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
   await call("Page.reload", {}, sessionId);
   await wait(
-    "document.querySelector('#status')?.textContent.includes('Waiting for a verified')",
+    "document.getElementById('status').textContent.includes('Waiting for a verified')",
   );
-  await reflow("webhook-pending");
-  await desktopShot("mock-pending");
-  await evaluate("document.documentElement.style.zoom='1'");
-  await call(
-    "Emulation.setDeviceMetricsOverride",
-    { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false },
-    sessionId,
-  );
-  const pendingOrder = store.get("SELECT * FROM orders LIMIT 1");
+  const paymentPending = store.get("SELECT * FROM orders LIMIT 1");
   commerce.settle(
-    pendingOrder.id,
-    await provider.inspect(pendingOrder.provider_id),
+    paymentPending.id,
+    await provider.inspect(paymentPending.provider_id),
     "mock-delayed-webhook",
   );
-  await click("Refresh saved status");
-  await wait(
-    "document.querySelector('#wardrobe').textContent.includes('Rosalyn Gala Outfit')",
-  );
+  await act("Refresh saved status");
   assert.match(
-    await evaluate("document.querySelector('#quote').textContent"),
-    /Rosalyn Gala Outfit.*USD 1.99/,
-  );
-  assert.match(
-    await evaluate("document.querySelector('#status').textContent"),
-    /Mock purchase completed.*no PayPal payment/,
-  );
-  await click("Wear purchased Rosalyn Gala Outfit");
-  await wait(
-    "document.querySelector('#requirements').textContent.includes('Formal outfit ✓')",
-  );
-  assert.ok(
-    !(await evaluate("document.querySelector('#guard').textContent")).includes(
-      "Welcome inside",
-    ),
-  );
-  await click("Walk to courier");
-  await wait("scene.near === 'seal'");
-  await click("Talk to Courier");
-  await click("Accept the seal");
-  await wait(
-    "document.querySelector('#requirements').textContent.includes('Seal ✓')",
-  );
-  await click("Walk to archivist");
-  await wait("scene.near === 'rumor'");
-  await click("Talk to Archivist");
-  await click("Remember the rumor");
-  await wait(
-    "document.querySelector('#guard').textContent.includes('Welcome inside')",
-  );
-  await click("Walk to guard");
-  await wait("scene.near === 'guard'");
-  await click("Talk to Gatekeeper");
-  await wait(
-    "document.querySelector('#dialogue-text').textContent.includes('gate is open')",
-  );
-  await click("Enter the gathering");
-  await wait("scene.arrived === true");
-  await screenshot("mock-complete");
-  await call("Page.reload", {}, sessionId);
-  await wait(
-    "document.querySelector('#guard')?.textContent.includes('Welcome inside')",
-  );
-  assert.match(
-    await evaluate("document.querySelector('#restore-summary').textContent"),
-    /Owned collection: Rosalyn Gala Outfit/,
-  );
-  assert.match(
-    await evaluate("document.querySelector('#progress-summary').textContent"),
-    /3 of 3 complete/,
-  );
-  await call("Page.reload", {}, sessionId);
-  await wait(
-    "document.querySelector('#progress-summary')?.textContent.includes('3 of 3 complete')",
-  );
-  assert.equal(store.get("SELECT count(*) n FROM orders").n, 1);
-  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 1);
-  await click("Walk to shop");
-  await wait("scene.near === 'shop'");
-  await click("Talk to Rosalyn");
-  await typeGoal("enter the evening gathering for free", "0.00");
-  await click("Recommend outfits");
-  await wait(
-    "document.querySelector('.plan-context')?.textContent.includes('Budget: USD 0.00')",
+    await evaluate("document.getElementById('status').textContent"),
+    /Mock purchase completed/,
   );
   assert.equal(
-    await evaluate("document.querySelectorAll('.product').length"),
-    0,
+    await evaluate("scene.state.equipped"),
+    null,
+    "grant does not auto-equip",
   );
-  assert.match(
-    await evaluate("document.querySelector('#plan').textContent"),
-    /Owned collection: Rosalyn Gala Outfit/,
-  );
-  assert.match(
-    await evaluate("document.querySelector('#comparison').textContent"),
-    /Already owned.*Additional cost: USD 0.00/,
-  );
-  assert.match(
-    await evaluate("document.querySelector('#comparison').textContent"),
-    /Traveler.*USD 0.99.*above budget/,
-  );
-  await click("Compare Traveler’s Cloak");
-  await wait("previewSku === 'rosalyn-traveler'");
-  assert.match(
-    await evaluate("document.querySelector('#look-reactions').textContent"),
-    /Gatekeeper:.*formal clothes/,
-  );
-  assert.ok(
-    !(
-      await evaluate(
-        "document.querySelector('#look-reactions').textContent.split('Gatekeeper:')[1]",
-      )
-    ).includes("still need the free invitation seal"),
-  );
+  await act("Wear purchased");
+  assert.equal(await evaluate("scene.state.formal"), true);
   assert.equal(
-    await evaluate(
-      "scene.state.formal && scene.state.seal && scene.state.rumor",
-    ),
-    true,
-    "previewing cloak leaves actual Gala and quest checks intact",
+    await evaluate("scene.state.canEnter"),
+    false,
+    "paid outfit cannot bypass free quests",
   );
-  const screenResult = await call(
-    "Page.captureScreenshot",
-    { format: "png", captureBeyondViewport: true },
-    sessionId,
+  await viewport(1280);
+  await completeStory();
+  for (let i = 0; i < 2; i++) {
+    await call("Page.reload", {}, sessionId);
+    await wait("scene.state.canEnter===true");
+    assert.equal(
+      await evaluate("document.getElementById('world-panel').hidden"),
+      false,
+    );
+    assert.equal(store.get("SELECT count(*) n FROM orders").n, 1);
+  }
+  await goal("enter the evening gathering for free", "0.00");
+  assert.match(
+    await evaluate("document.getElementById('choices').textContent"),
+    /Wear what I own/,
   );
-  await writeFile(
-    "/tmp/gca-browser-smoke.png",
-    Buffer.from(screenResult.data, "base64"),
+  assert.doesNotMatch(
+    await evaluate("document.getElementById('choices').textContent"),
+    /Borrow for free/,
   );
-  // Second SKU exercises cancellation through actual rendered controls.
-  await typeGoal("travel cloak", "1.00");
-  await click("Recommend outfits");
-  await wait(
-    "document.querySelector('#products').textContent.includes('Traveler')",
+  const ownedBefore = snapshot();
+  await act("Wear what I own");
+  assert.equal(snapshot(), ownedBefore);
+  assert.match(
+    await evaluate("document.getElementById('preview-caption').textContent"),
+    /Already owned/,
   );
-  await click("Review purchase");
-  await wait(
-    "document.querySelector('#quote').textContent.includes('I confirm USD 0.99')",
+  await act("Confirm & wear");
+  assert.equal(
+    await evaluate("scene.state.borrowed"),
+    false,
+    "owned path does not create an unnecessary loan",
   );
-  await click("I confirm");
-  await wait(
-    "document.querySelector('#checkout').textContent.includes('Cancel checkout')",
+  await goal("travel cloak", "1.00");
+  await act("Find a look to buy");
+  await act("Preview / Review purchase");
+  await act("I confirm");
+  await act("Cancel checkout");
+  assert.match(
+    await evaluate("document.getElementById('status').textContent"),
+    /Purchase cancelled/,
   );
-  await click("Cancel checkout");
-  await wait(
-    "document.querySelector('#status').textContent.includes('Purchase cancelled')",
-  );
-  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 1);
   const cancelled = store.get("SELECT id FROM orders WHERE status='CANCELLED'");
   await call(
     "Page.navigate",
@@ -573,149 +507,54 @@ try {
     sessionId,
   );
   await wait(
-    "document.querySelector('#status')?.textContent.includes('Purchase cancelled')",
+    "document.getElementById('status').textContent.includes('Purchase cancelled')",
   );
   assert.equal(
-    await evaluate("document.querySelector('#checkout').children.length"),
+    await evaluate("document.getElementById('checkout').children.length"),
     0,
   );
-  // Mobile pointer layout and 200% reflow, followed by a Tab/Enter-only free route.
-  await call(
-    "Emulation.setDeviceMetricsOverride",
-    { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
-    sessionId,
-  );
+  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 1);
+  // New player's free route: actual Tab/Enter, 390px and 200% CSS reflow.
+  await call("Network.clearBrowserCookies", {}, sessionId);
+  await call("Page.navigate", { url: origin }, sessionId);
+  await wait("!!session");
+  await viewport(390, 844);
   await call(
     "Emulation.setEmulatedMedia",
     { features: [{ name: "prefers-reduced-motion", value: "reduce" }] },
     sessionId,
   );
-  const key = async (key, code = key, modifiers = 0) => {
-    await call(
-      "Input.dispatchKeyEvent",
-      {
-        type: "keyDown",
-        key,
-        code,
-        modifiers,
-        text: key === "Enter" ? "\r" : undefined,
-        windowsVirtualKeyCode: key === "Tab" ? 9 : 13,
-      },
-      sessionId,
-    );
-    await call(
-      "Input.dispatchKeyEvent",
-      {
-        type: "keyUp",
-        key,
-        code,
-        modifiers,
-        windowsVirtualKeyCode: key === "Tab" ? 9 : 13,
-      },
-      sessionId,
-    );
-  };
-  const tabActivate = async (label) => {
-    await wait("true");
-    for (let i = 0; i < 100; i++) {
-      await wait("true");
-      if (
-        await evaluate(
-          `document.activeElement?.tagName==='BUTTON' && document.activeElement.textContent.includes(${JSON.stringify(label)}) && !document.activeElement.disabled`,
-        )
-      ) {
-        await key("Enter");
-        return;
-      }
-      const reverse = await evaluate(
-        `(()=>{const target=[...document.querySelectorAll('button')].find(b=>b.textContent.includes(${JSON.stringify(label)})&&!b.disabled);return !!(target && document.activeElement.compareDocumentPosition(target)&2);})()`,
-      );
-      await key("Tab", "Tab", reverse ? 8 : 0);
-    }
-    throw new Error("Tab unreachable: " + label);
-  };
-  // A fresh browser session finishes the story entirely for free.
-  await call("Network.clearBrowserCookies", {}, sessionId);
-  await call("Page.navigate", { url: origin }, sessionId);
-  await wait("document.querySelector('#mode')?.textContent.includes('MOCK')");
-  assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"));
   await evaluate("document.documentElement.style.zoom='2'");
-  assert.ok(
-    await evaluate("document.documentElement.scrollWidth<=innerWidth"),
-    "200% reflow overflow",
-  );
-  await screenshot("mobile-200-percent");
-  await tabActivate("Walk to shop");
-  await wait("scene.near === 'shop'");
-  await tabActivate("Talk to Rosalyn");
-  await reflow("keyboard-open-shop");
-  await tabActivate("Recommend outfits");
-  await wait("document.querySelectorAll('.product').length===1");
-  await tabActivate("Compare Traveler’s Cloak");
-  await wait("previewSku === 'rosalyn-traveler'");
-  await reflow("keyboard-cloak-reactions");
+  await tabButton("Show my choices");
+  await layout();
+  await tabButton("Borrow for free");
+  await layout();
+  assert.equal(await evaluate("scene.state.borrowed"), false);
+  await tabTo("#look-details summary");
+  await tabButton("Preview Traveler’s Cloak only");
   assert.match(
-    await evaluate("document.querySelector('#look-reactions').textContent"),
-    /Rosalyn:.*teal cloak/,
+    await evaluate("document.getElementById('look-reactions').textContent"),
+    /Gatekeeper:.*formal clothes/,
   );
-  await tabActivate("Preview Plain formal loan only");
-  await wait("previewSku === 'borrowed'");
-  await reflow("keyboard-loan-reactions");
-  assert.match(
-    await evaluate("document.querySelector('#look-reactions').textContent"),
-    /same dress check as Gala, for free/,
-  );
-  await tabActivate("Borrow formal clothes");
-  await wait(
-    "document.querySelector('#wardrobe').textContent.includes('Free loan')",
-  );
-  assert.ok(
-    await evaluate(
-      "document.querySelector('#plan').textContent.includes('state changed')",
-    ),
-  );
+  await tabTo("#back-preview");
+  await tabButton("Borrow for free");
+  await tabButton("Confirm free loan");
   assert.equal(
-    await evaluate("document.querySelectorAll('.product').length"),
-    0,
+    await evaluate("scene.state.borrowed && scene.state.formal"),
+    true,
   );
-  assert.match(
-    await evaluate("document.querySelector('#progress-summary').textContent"),
-    /Owned collection: none.*available, not owned/,
-  );
-  await tabActivate("Next: visit the courier");
-  await wait("scene.near === 'seal'");
-  await tabActivate("Talk to Courier");
-  await tabActivate("Accept the seal");
-  await tabActivate("Next: visit the archivist");
-  await wait("scene.near === 'rumor'");
-  await tabActivate("Talk to Archivist");
-  await tabActivate("Remember the rumor");
-  await tabActivate("Walk to guard");
-  await wait("scene.near === 'guard'");
-  await tabActivate("Talk to Gatekeeper");
-  await tabActivate("Enter the gathering");
-  await wait("scene.arrived === true");
-  assert.equal(store.get("SELECT count(*) n FROM orders").n, 2);
-  for (let attempt = 0; attempt < 2; attempt++) {
+  assert.deepEqual(await evaluate("scene.state.owned"), []);
+  await completeStory(true);
+  await layout();
+  for (let i = 0; i < 2; i++) {
     await call("Page.reload", {}, sessionId);
-    await wait(
-      "document.querySelector('#progress-summary')?.textContent.includes('3 of 3 complete')",
-    );
-    assert.match(
-      await evaluate("document.querySelector('#restore-summary').textContent"),
-      /Owned collection: none.*available, not owned/,
-    );
+    await wait("scene.state.canEnter===true");
     await evaluate("document.documentElement.style.zoom='2'");
-    await reflow("free-restored");
-    await tabActivate("Your story path is ready");
-    await wait("scene.near === 'guard'");
-    await tabActivate("Talk to Gatekeeper");
-    await tabActivate("Enter the gathering");
-    await wait("scene.arrived === true");
+    await layout();
+    assert.deepEqual(await evaluate("scene.state.owned"), []);
     assert.equal(store.get("SELECT count(*) n FROM orders").n, 2);
   }
-  // Synthetic authenticated independent host: UI obtains server dialogue challenges.
-  // No real AI, provider, deployment, or private identity system is involved.
+  // The independent authenticated host still gets a server challenge only on free confirmation.
   const demoStore = new Store();
   const demoOrigin = `http://127.0.0.1:${port + 10}`;
   const demoPassword = "synthetic-browser-test-password";
@@ -749,35 +588,21 @@ try {
     );
     await call("Page.navigate", { url: demoOrigin }, sessionId);
     await wait("session?.gameHost==='independent-sandbox-demo'");
-    await evaluate("document.documentElement.style.zoom='2'");
-    await tabActivate("Walk to shop");
-    await wait("scene.near==='shop'");
-    await tabActivate("Talk to Rosalyn");
-    await tabActivate("Borrow formal clothes");
-    for (const [walk, near, talk, accept] of [
-      ["Walk to courier", "seal", "Talk to Courier", "Accept the seal"],
-      ["Walk to archivist", "rumor", "Talk to Archivist", "Remember the rumor"],
-    ]) {
-      await tabActivate(walk);
-      await wait(`scene.near==='${near}'`);
-      await tabActivate(talk);
-      await tabActivate(accept);
-    }
-    await tabActivate("Walk to guard");
-    await wait("scene.near==='guard'");
-    await tabActivate("Talk to Gatekeeper");
-    await tabActivate("Enter the gathering");
-    await wait("scene.arrived===true");
+    await tabButton("Show my choices");
+    await tabButton("Borrow for free");
+    assert.equal(demoStore.get("SELECT count(*) n FROM demo_challenges").n, 0);
+    assert.equal(await evaluate("scene.state.borrowed"), false);
+    await tabButton("Confirm free loan");
+    await completeStory(true);
     assert.equal(demoStore.get("SELECT count(*) n FROM orders").n, 0);
     assert.equal(demoStore.get("SELECT count(*) n FROM entitlements").n, 0);
-    assert.equal(demoStore.get("SELECT count(*) n FROM principals").n, 1);
     assert.equal(demoStore.get("SELECT count(*) n FROM demo_challenges").n, 0);
   } finally {
     await new Promise((r) => demo.server.close(r));
     demoStore.close();
   }
   console.log(
-    "PASS Chromium goal/cost comparison; Gala/cloak/loan previews with two NPC reactions and no ledger mutations; pointer purchase/quote isolation/recovery; mobile 390px and CSS 200% reflow; Tab/Enter free completion and repeated restore; global session error/retry; reduced motion; authenticated independent demo free route. Mock rehearsal only.",
+    "PASS simplified goal → two choices → preview → explicit confirmation; free/owned/paid paths; no preview mutation; quote isolation; lost create/capture response and delayed notification; cancellation/reload/repeated restoration; desktop/390px/200% CSS reflow; Tab/Enter free route; authenticated demo. MOCK only.",
   );
 } finally {
   socket?.close();

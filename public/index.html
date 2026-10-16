@@ -10,147 +10,163 @@
   </head>
   <body>
     <header>
-      <span class="brand">GCA / PLAYABLE COMMERCE</span
-      ><span id="mode">Connecting…</span>
+      <span class="brand">ROSALYN’S ATELIER</span
+      ><span id="mode">Connecting…</span
+      ><button id="switch-view" type="button">Courtyard</button>
     </header>
     <div id="global-error" role="alert" hidden>
       <p id="error-message"></p>
-      <button id="retry-connection">Retry connection / restore progress</button>
+      <button id="retry-connection">Restore saved progress</button>
+      <details>
+        <summary>Error details</summary>
+        <p id="error-code"></p>
+      </details>
     </div>
     <main>
-      <section class="intro wide">
-        <p class="eyebrow">A SMALL ADVENTURE. YOUR CHOICE.</p>
-        <h1>Dress for the story.</h1>
-        <p>
-          The gathering is beyond the gate. Find your look, a seal, and the
-          rumor. Every story path can be completed for free.
-        </p>
-        <canvas
-          id="world"
-          width="1000"
-          height="450"
-          tabindex="0"
-          aria-label="Playable atelier courtyard. Click to walk, use arrow keys or WASD, and E to talk."
-        ></canvas>
-        <div class="travel">
-          <button data-walk="shop">Walk to shop</button
-          ><button data-walk="seal">Walk to courier</button
-          ><button data-walk="rumor">Walk to archivist</button
-          ><button data-walk="guard">Walk to guard</button
-          ><button data-walk="exit">Enter the gathering</button
-          ><button id="interact" disabled>Walk near someone to talk</button>
-        </div>
-        <p class="controls">
-          Click the courtyard or use WASD / arrow keys to move · E to talk ·
-          Walk through the open gate to finish
-        </p>
-        <div class="dialogue">
-          <p id="dialogue-text" role="status">
-            Visit Rosalyn for a look that fits your plan. Or ask to borrow
-            formal clothes for free.
-          </p>
-          <div id="dialogue-actions"></div>
-        </div>
-        <section class="journey" aria-labelledby="journey-title">
-          <h2 id="journey-title">Your free story path</h2>
-          <p id="progress-summary" role="status">
-            Loading your saved wardrobe and quests…
-          </p>
-          <div id="next-step"></div>
-          <p id="restore-summary" class="controls"></p>
-        </section>
-      </section>
-      <section class="panel" id="shop-panel" hidden>
-        <h2>Ask Rosalyn</h2>
-        <p>Tell me your goal and budget. Buying is always optional.</p>
-        <p id="ai-notice"></p>
+      <section class="panel" id="shop-panel">
         <form id="recommend">
-          <label for="goal">Your goal</label
-          ><textarea id="goal" maxlength="500" required>
-I need formal clothes to get past the guard.</textarea
-          ><label for="budget">Budget in USD</label
-          ><input
-            id="budget"
-            type="number"
-            min="0"
-            max="1000"
-            step="0.01"
-            value="3.00"
+          <p class="eyebrow">1 · YOUR GOAL</p>
+          <h1>What would you like to do?</h1>
+          <label for="goal">Tell Rosalyn</label>
+          <input
+            id="goal"
+            maxlength="500"
+            value="I want to go to the gathering."
             required
-          /><button>Recommend outfits</button>
+          />
+          <details id="budget-details">
+            <summary>Optional budget</summary>
+            <label for="budget">Budget in USD</label
+            ><input
+              id="budget"
+              type="number"
+              min="0"
+              max="1000"
+              step="0.01"
+              value="3.00"
+              required
+            />
+          </details>
+          <p id="ai-notice" class="hint" hidden></p>
+          <button class="primary">Show my choices</button>
+          <p class="hint">The story is free. Buying a look is optional.</p>
         </form>
-        <div id="plan"></div>
-        <section
-          id="comparison"
-          hidden
-          aria-label="Compare paths to the gathering"
-        ></section>
-        <div id="products"></div>
-        <p id="alternative">
-          Free route: borrow formal clothes, find a seal, and learn the rumor.
-        </p>
+        <section id="choice-step" hidden>
+          <button id="change-goal" class="back" type="button">
+            ← Change goal
+          </button>
+          <p class="eyebrow">2 · YOUR CHOICE</p>
+          <h1 id="choice-goal"></h1>
+          <p id="choice-note"></p>
+          <div id="choices"></div>
+        </section>
+        <section id="browse-step" hidden>
+          <button id="back-choices" class="back" type="button">
+            ← Your choices
+          </button>
+          <h1>Find your look.</h1>
+          <p class="hint">Optional cosmetics. The free route stays open.</p>
+          <div id="products"></div>
+        </section>
+        <details id="plan-details" hidden>
+          <summary>Why these choices?</summary>
+          <div id="plan"></div>
+          <section
+            id="comparison"
+            hidden
+            aria-label="Compare paths to the gathering"
+          ></section>
+          <p id="alternative"></p>
+        </details>
       </section>
       <section class="panel" id="purchase-panel" hidden>
-        <h2>Your fitting room</h2>
-        <div
-          id="preview-options"
-          aria-label="Preview looks without purchasing"
-        ></div>
-        <div class="look-comparison">
-          <figure>
-            <canvas
-              id="preview"
-              width="240"
-              height="140"
-              aria-label="Selected outfit preview"
-            ></canvas>
-            <figcaption id="preview-caption">Selected collectible</figcaption>
-          </figure>
+        <button id="back-preview" class="back" type="button">
+          ← Your choices
+        </button>
+        <p class="eyebrow">3 · PREVIEW & CONFIRM</p>
+        <figure class="main-look">
+          <canvas
+            id="preview"
+            width="240"
+            height="140"
+            aria-label="Selected outfit preview"
+          ></canvas>
+          <figcaption id="preview-caption"></figcaption>
+        </figure>
+        <p id="preview-brief"></p>
+        <div id="quote" tabindex="-1"></div>
+        <div id="checkout"></div>
+        <div id="pending-purchase"></div>
+        <p id="status" role="status" aria-live="polite"></p>
+        <details id="look-details">
+          <summary>Other looks & details</summary>
+          <div
+            id="preview-options"
+            aria-label="Preview looks without purchasing"
+          ></div>
           <figure>
             <canvas
               id="loan-preview"
               width="240"
               height="140"
-              aria-label="Plain formal clothes, free loan preview"
+              aria-label="Plain formal loan preview"
             ></canvas>
-            <figcaption>
-              Plain formal loan · Free<br />Meets the same dress check as Gala.
-            </figcaption>
+            <figcaption>Free loan · Same dress check as Gala</figcaption>
           </figure>
-        </div>
-        <p class="controls">
-          Preview only. Your character changes only when you choose to wear an
-          available outfit. Neither look replaces the seal or password quests.
-        </p>
-        <section
-          id="look-reactions"
-          aria-label="Conditional NPC reactions"
-        ></section>
-        <div id="quote" tabindex="-1">
-          Select an outfit to see its exact price and contents.
-        </div>
-        <div id="checkout"></div>
-        <div id="pending-purchase"></div>
-        <p id="status" role="status" aria-live="polite"></p>
+          <section
+            id="look-reactions"
+            aria-label="Conditional NPC reactions"
+          ></section>
+          <div id="purchase-details"></div>
+        </details>
       </section>
-      <section class="panel">
-        <h2>Wardrobe & the gate</h2>
-        <div id="wardrobe"></div>
-        <p id="guard"></p>
-        <p id="requirements"></p>
+      <section class="intro" id="world-panel" hidden>
+        <h1>The gathering awaits.</h1>
+        <canvas
+          id="world"
+          width="1000"
+          height="450"
+          tabindex="0"
+          aria-label="Playable courtyard. Click to walk, arrow keys or WASD to move, E to talk."
+        ></canvas>
+        <div class="dialogue">
+          <p id="dialogue-text" role="status">
+            Choose a look with Rosalyn. Every story path is free.
+          </p>
+          <div id="dialogue-actions"></div>
+        </div>
+        <button id="interact" disabled>Walk near someone to talk</button>
+        <div class="journey">
+          <p id="requirements"></p>
+          <div id="next-step"></div>
+          <p id="progress-summary" role="status" class="hint"></p>
+        </div>
+        <details id="travel-details">
+          <summary>Explore the courtyard</summary>
+          <div class="travel">
+            <button data-walk="shop">Walk to shop</button
+            ><button data-walk="seal">Walk to courier</button
+            ><button data-walk="rumor">Walk to archivist</button
+            ><button data-walk="guard">Walk to guard</button
+            ><button data-walk="exit">Enter the gathering</button>
+          </div>
+          <p class="hint">Click to walk · WASD / arrows · E to talk</p>
+        </details>
+        <details id="wardrobe-details">
+          <summary>Wardrobe & saved progress</summary>
+          <div id="wardrobe"></div>
+          <p id="guard"></p>
+          <p id="restore-summary"></p>
+        </details>
+        <details id="evidence-panel">
+          <summary>Demo evidence</summary>
+          <p>
+            Mock rehearsal. No payment or conversation details enter analytics.
+          </p>
+          <div id="funnel"></div>
+        </details>
       </section>
-      <details class="panel wide" id="evidence-panel">
-        <summary>Evidence panel · session funnel</summary>
-        <p>
-          Only event names and pseudonymous IDs are stored. No conversation,
-          payment details or email enters analytics.
-        </p>
-        <div id="funnel"></div>
-      </details>
     </main>
-    <footer>
-      Sandbox only. Original demo content. No real money. AI never approves a
-      purchase.
-    </footer>
+    <footer>Original demo · Sandbox only · No real money</footer>
   </body>
 </html>

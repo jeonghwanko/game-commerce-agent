@@ -203,3 +203,22 @@ test("HTTP: repeated preview reads and mock comparison do not award rights, ques
   assert.equal(result.comparison.options[1].withinBudget, false);
   assert.equal(snapshot(), before);
 });
+
+test("mock demo: Korean gathering goal keeps the free formal route and optional catalog purchase separate", async () => {
+  const result = await new Recommender({ mode: "mock" }).recommend(
+    { goal: "무도회에 가고 싶어", budgetMinor: 300 },
+    state,
+  );
+  assert.equal(result.plan.goal, "guard");
+  assert.equal(
+    result.plan.actions.some((a) => a.type === "borrow"),
+    true,
+  );
+  assert.equal(result.plan.projected.canEnter, true);
+  assert.deepEqual(
+    result.products.map((p) => p.sku),
+    ["rosalyn-gala"],
+  );
+  assert.equal(state.borrowed, false);
+  assert.deepEqual(state.owned, []);
+});

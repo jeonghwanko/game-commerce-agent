@@ -5,6 +5,7 @@ let pendingOrder;
 let busy = false;
 let gameSnapshot;
 let previewSku;
+let lastRecommendation;
 const names = {
   "rosalyn-gala": "Rosalyn Gala Outfit",
   "rosalyn-traveler": "Traveler’s Cloak",
@@ -26,22 +27,16 @@ const scene = new AtelierScene($("#world"), (place) =>
     actions.replaceChildren();
     const dialogue =
       session.gameHost === "independent-sandbox-demo" &&
-      ["shop", "seal", "rumor"].includes(place)
+      ["seal", "rumor"].includes(place)
         ? await api("/api/game/interact", { npc: place })
         : {};
     if (place === "shop") {
-      $("#shop-panel").hidden = false;
+      openGoal();
       $("#goal").focus();
       $("#dialogue-text").textContent =
-        "Rosalyn: Let’s solve your goal. The gala coat has gold star embroidery; the traveler’s cloak has a flowing teal cape. Borrowed formal clothes pass the same dress check, for free.";
+        "Rosalyn: Borrow for free, or choose a look you love.";
       actions.append(
-        button("Borrow formal clothes · Free", async () => {
-          await api("/api/game/quest", { quest: "borrowed", ...dialogue });
-          await api("/api/game/equip", { sku: "borrowed" });
-          await refresh();
-          $("#dialogue-text").textContent =
-            "Rosalyn: A free loan, separate from your owned collection. Check the gate checklist for any remaining quests.";
-        }),
+        button("Preview a free loan", () => previewAccess("borrowed")),
       );
     } else if (place === "seal" || place === "rumor") {
       $("#dialogue-text").textContent =
@@ -73,8 +68,106 @@ document
   .forEach((b) => (b.onclick = () => walk(b.dataset.walk)));
 $("#interact").onclick = () => scene.interact();
 function walk(place) {
+  showStage("world");
   scene.walkTo(place);
   $("#world").focus();
+}
+function showStage(stage) {
+  for (const name of ["shop", "purchase", "world"])
+    $(`#${name}-panel`).hidden = name !== stage;
+  $("#switch-view").textContent =
+    stage === "world" ? "Ask Rosalyn" : "Courtyard";
+}
+function openGoal() {
+  showStage("shop");
+  $("#recommend").hidden = false;
+  $("#choice-step").hidden = true;
+  $("#browse-step").hidden = true;
+  $("#plan-details").open = false;
+  $("#goal").focus();
+}
+function renderChoices() {
+  if (!lastRecommendation) {
+    openGoal();
+    return;
+  }
+  showStage("shop");
+  $("#recommend").hidden = true;
+  $("#choice-step").hidden = false;
+  $("#browse-step").hidden = true;
+  $("#plan-details").hidden = false;
+  $("#plan-details").open = false;
+  $("#choice-goal").textContent = $("#goal").value;
+  const g = scene.state;
+  const ownedFormal = g.previews.find(
+    (p) => p.access === "owned" && p.dressCheck,
+  );
+  const story = lastRecommendation.plan.goal === "guard";
+  const offerFormal =
+    story &&
+    !lastRecommendation.interpretation.clarify &&
+    !lastRecommendation.interpretation.avoidStyles.includes("formal");
+  $("#choice-note").textContent = offerFormal
+    ? "The same story is open for free. Buying is optional."
+    : (lastRecommendation.plan.actions[0]?.label ?? "Choose your next step.");
+  $("#choices").replaceChildren(
+    button(
+      offerFormal
+        ? ownedFormal
+          ? "Wear what I own · Free"
+          : "Borrow for free"
+        : "Keep my outfit · Free",
+      () =>
+        offerFormal
+          ? previewAccess(ownedFormal?.sku ?? "borrowed")
+          : showStage("world"),
+    ),
+    button("Find a look to buy · Optional", () => {
+      $("#choice-step").hidden = true;
+      $("#browse-step").hidden = false;
+      $("#browse-step h1").tabIndex = -1;
+      $("#browse-step h1").focus();
+    }),
+  );
+  $("#choices button").focus();
+}
+async function previewAccess(sku) {
+  resetFittingRoom();
+  await refresh();
+  preview(sku);
+  const g = scene.state;
+  const available = sku === "borrowed" || g.owned.includes(sku);
+  $("#quote").replaceChildren(
+    text("h3", names[sku]),
+    text("p", "USD 0.00 · No purchase", "price"),
+  );
+  if (available)
+    $("#quote").append(
+      button(
+        sku === "borrowed" && !g.borrowed
+          ? "Confirm free loan & wear"
+          : "Confirm & wear",
+        async () => {
+          if (sku === "borrowed" && !scene.state.borrowed) {
+            const dialogue =
+              session.gameHost === "independent-sandbox-demo"
+                ? await api("/api/game/interact", { npc: "shop" })
+                : {};
+            await api("/api/game/quest", { quest: "borrowed", ...dialogue });
+          }
+          await wear(sku);
+        },
+      ),
+    );
+  else
+    $("#quote").append(
+      text(
+        "p",
+        "This outfit is unavailable. Restore your wardrobe to check its status.",
+      ),
+    );
+  $("#status").textContent = "Preview only. Nothing changed.";
+  $("#quote").focus();
 }
 function preview(sku) {
   previewSku = sku;
@@ -91,7 +184,10 @@ function preview(sku) {
   }
   const look = scene.state.previews?.find((p) => p.sku === sku);
   $("#preview-caption").textContent =
-    `${names[sku]} · ${sku === "borrowed" ? "Free loan, not owned" : "Optional permanent collection"}`;
+    `Preview only · ${look?.access === "owned" ? "Already owned" : sku === "borrowed" ? "Free loan, not owned" : look?.access === "held" ? "Unavailable — on hold" : "Not owned"}`;
+  $("#preview-brief").textContent = look
+    ? `${look.dressCheck ? "Formal clothes ✓" : "Cosmetic only · not formal"}. ${look.remaining.length ? "Still need: " + [!look.afterWearing.formal && "formal clothes", !look.afterWearing.seal && "seal", !look.afterWearing.rumor && "password"].filter(Boolean).join(" + ") : "Ready for entry when worn"}.`
+    : "Preview only. Nothing has changed.";
   $("#look-reactions").replaceChildren();
   if (look)
     $("#look-reactions").append(
@@ -155,8 +251,10 @@ async function run(fn) {
   } catch (e) {
     $("#global-error").hidden = false;
     $("#error-message").textContent =
-      `Could not complete: ${e.message}. Retry connection to check saved progress. A failed request does not confirm a payment.`;
-    $("#status").textContent = `Could not complete: ${e.message}`;
+      "Could not finish. Restore saved progress before trying again.";
+    $("#error-code").textContent = e.message;
+    $("#status").textContent =
+      "Not confirmed. Your saved purchase may still be recoverable.";
   } finally {
     busy = false;
     syncControls();
@@ -187,22 +285,25 @@ function savedSummary(g) {
 async function wear(sku) {
   await api("/api/game/equip", { sku });
   await refresh();
+  showStage("world");
   $("#world").focus();
 }
 function storyStep(g) {
   $("#progress-summary").textContent =
-    `${savedSummary(g)} Gate checks: ${[g.formal, g.seal, g.rumor].filter(Boolean).length} of 3 complete.`;
+    `${[g.formal, g.seal, g.rumor].filter(Boolean).length} of 3 checks complete · ${g.owned.length} owned looks · ${g.borrowed ? "free loan available" : "free loan available at Rosalyn’s"}`;
   const next = $("#next-step");
   next.replaceChildren();
   if (!g.formal) {
     if (g.owned.includes("rosalyn-gala"))
       next.append(
         button("Wear your owned Gala · No purchase", () =>
-          wear("rosalyn-gala"),
+          previewAccess("rosalyn-gala"),
         ),
       );
     else if (g.borrowed)
-      next.append(button("Wear your free loan", () => wear("borrowed")));
+      next.append(
+        button("Wear your free loan", () => previewAccess("borrowed")),
+      );
     else
       next.append(button("Visit Rosalyn for a free loan", () => walk("shop")));
   } else if (!g.seal)
@@ -225,6 +326,10 @@ async function refresh() {
   ]);
   const snapshot = JSON.stringify(g);
   if (gameSnapshot && gameSnapshot !== snapshot) {
+    lastRecommendation = undefined;
+    $("#choice-step").hidden = true;
+    $("#browse-step").hidden = true;
+    $("#recommend").hidden = false;
     $("#comparison").hidden = true;
     $("#comparison").replaceChildren();
     $("#plan").replaceChildren(
@@ -250,7 +355,7 @@ async function refresh() {
   for (const sku of [...g.owned, ...(g.borrowed ? ["borrowed"] : [])])
     $("#wardrobe").append(
       button(`Wear ${names[sku]}${g.equipped === sku ? " ✓" : ""}`, () =>
-        wear(sku),
+        previewAccess(sku),
       ),
     );
   $("#guard").textContent = g.canEnter
@@ -269,6 +374,8 @@ function resetFittingRoom() {
   delete $("#checkout").dataset.orderId;
   $("#checkout").replaceChildren();
   $("#quote").replaceChildren();
+  $("#purchase-details").replaceChildren();
+  $("#look-details").open = false;
   $("#pending-purchase").replaceChildren();
   if (previous)
     $("#pending-purchase").append(
@@ -276,16 +383,15 @@ function resetFittingRoom() {
         showOrder(await api(`/api/commerce/orders/${previous}`)),
       ),
     );
-  $("#purchase-panel").hidden = false;
+  showStage("purchase");
 }
 async function previewOnly(sku) {
   resetFittingRoom();
   await refresh();
   preview(sku);
   $("#quote").textContent =
-    "Preview only — no quote, order or ownership is created. Return to Rosalyn’s plan to review an optional purchase.";
-  $("#status").textContent =
-    "Compare the looks and NPC reactions. The free story path is always available.";
+    "Preview only. Return to your choices to wear or buy.";
+  $("#status").textContent = "Nothing changed. Buying is optional.";
   $("#quote").focus();
 }
 async function select(p) {
@@ -295,12 +401,8 @@ async function select(p) {
   const q = await api("/api/commerce/quotes", { sku: p.sku });
   $("#quote").replaceChildren(
     text("h3", p.name),
-    text("p", p.description),
     text("p", price(q), "price"),
-    text(
-      "p",
-      `One permanent cosmetic outfit. Quote expires ${new Date(q.expires).toLocaleTimeString()}. Seal and rumor quests remain required.`,
-    ),
+    text("p", "Optional cosmetic · one permanent outfit", "hint"),
     button(`I confirm ${price(q)} for ${p.name}`, async () => {
       const o = await api("/api/commerce/orders", {
         quoteId: q.id,
@@ -313,12 +415,17 @@ async function select(p) {
       await showOrder(o);
     }),
   );
-  $("#status").textContent =
-    "Review the product, amount, and currency before confirming.";
+  $("#purchase-details").append(
+    text("p", p.description),
+    text("p", `Quote expires ${new Date(q.expires).toLocaleTimeString()}.`),
+  );
+  $("#status").textContent = "Not purchased or equipped yet.";
   $("#quote").focus();
 }
 async function showOrder(o) {
-  $("#purchase-panel").hidden = false;
+  showStage("purchase");
+  $("#purchase-details").replaceChildren();
+  $("#look-details").open = false;
   $("#pending-purchase").replaceChildren();
   preview(o.sku);
   $("#quote").replaceChildren(
@@ -343,7 +450,7 @@ async function showOrder(o) {
   $("#status").textContent =
     `Order ${statuses[o.status] ?? "Checking purchase"}`;
   if (o.status === "CREATING") {
-    $("#quote").append(
+    $("#purchase-details").replaceChildren(
       text(
         "p",
         "This purchase was already confirmed. Resume uses the same original quote and order request; it does not change its price or start a second purchase. A quote expiry does not erase saved consent. Recovery older than five hours needs operator review.",
@@ -372,16 +479,13 @@ async function showOrder(o) {
   if (o.status === "APPROVAL_PENDING") {
     if (session.paymentMode === "mock")
       $("#checkout").append(
-        button(
-          "Simulate buyer approval + verified webhook (MOCK)",
-          async () => {
-            const result = await api(
-              `/api/commerce/orders/${o.id}/mock-approve`,
-              {},
-            );
-            await showOrder(result);
-          },
-        ),
+        button("Complete mock payment", async () => {
+          const result = await api(
+            `/api/commerce/orders/${o.id}/mock-approve`,
+            {},
+          );
+          await showOrder(result);
+        }),
       );
     else {
       const a = text("a", "Continue to PayPal Sandbox", "action");
@@ -415,7 +519,7 @@ async function showOrder(o) {
   if (o.status === "GRANTED")
     $("#status").textContent =
       session.paymentMode === "mock"
-        ? "Mock purchase completed. Your outfit is in the wardrobe; no PayPal payment occurred."
+        ? "Mock purchase completed · No PayPal payment."
         : "Verified purchase completed. Your outfit is in the wardrobe.";
   if (o.status === "AWAITING_WEBHOOK")
     $("#status").textContent =
@@ -517,7 +621,9 @@ $("#recommend").onsubmit = (e) => {
         // A loan may still need to be borrowed; the server remains authoritative.
         if (action.sku !== "borrowed" || scene.state.borrowed)
           step.append(
-            button(`Wear ${names[action.sku]} now`, () => wear(action.sku)),
+            button(`Wear ${names[action.sku]} now`, () =>
+              previewAccess(action.sku),
+            ),
           );
       } else if (action.type === "borrow")
         step.append(button("Visit Rosalyn · Free loan", () => walk("shop")));
@@ -537,7 +643,6 @@ $("#recommend").onsubmit = (e) => {
       const card = text("div", "", "product");
       card.append(
         text("h3", p.name),
-        text("p", p.description),
         text("p", price(p), "price"),
         button("Preview / Review purchase", () => select(p)),
       );
@@ -545,11 +650,16 @@ $("#recommend").onsubmit = (e) => {
     }
     if (!result.products.length)
       $("#products").append(
-        text("p", "No purchase suggested for this plan. See the reason above."),
+        text(
+          "p",
+          "Nothing to buy for this goal and budget. Your free route remains available.",
+        ),
       );
     $("#alternative").textContent = result.freeAlternative;
     comparePaths(result.comparison);
     await refresh();
+    lastRecommendation = result;
+    renderChoices();
   });
 };
 document.querySelectorAll("[data-quest]").forEach(
@@ -567,11 +677,20 @@ async function boot() {
     session.aiMode === "openai"
       ? "Your goal and minimal game context are sent to OpenAI for this recommendation."
       : "Offline demo recommendations. No AI API is called.";
+  $("#ai-notice").hidden = session.aiMode !== "openai";
   $("#mode").textContent =
     `${session.paymentMode.toUpperCase()} · AI: ${session.aiMode.toUpperCase()}${session.paymentMode === "mock" ? " · REHEARSAL" : ""}`;
   await refresh();
   $("#restore-summary").textContent =
     `Server-saved wardrobe and quest progress loaded for this session. ${savedSummary(scene.state)} Reopening starts you in the courtyard; movement and typed goals are not saved. Keep the same unexpired browser session to resume.`;
+  showStage(
+    scene.state.owned.length ||
+      scene.state.borrowed ||
+      scene.state.seal ||
+      scene.state.rumor
+      ? "world"
+      : "shop",
+  );
   const params = new URLSearchParams(location.search);
   const id = params.get("order");
   if (id) {
@@ -594,5 +713,10 @@ async function boot() {
       await showOrder(await api(`/api/commerce/orders/${pending.id}`));
   }
 }
+$("#switch-view").onclick = () =>
+  $("#world-panel").hidden ? showStage("world") : openGoal();
+$("#change-goal").onclick = openGoal;
+$("#back-choices").onclick = renderChoices;
+$("#back-preview").onclick = renderChoices;
 $("#retry-connection").onclick = () => run(boot);
 run(boot);
