@@ -659,14 +659,20 @@ try {
     assert.equal(
       (
         await fetch(sitesOrigin + "/app.js", {
-          headers: { "oai-authenticated-user-id": "other-user" },
+          headers: {
+            "oai-authenticated-user-id": "other-user",
+            "oai-authenticated-user-email": "other@example.invalid",
+          },
         })
       ).status,
       403,
     );
     await call(
       "Network.setExtraHTTPHeaders",
-      { headers: { "oai-authenticated-user-id": "synthetic-site-owner" } },
+      { headers: {
+        "oai-authenticated-user-id": "synthetic-site-owner",
+        "oai-authenticated-user-email": "owner@example.invalid",
+      } },
       sessionId,
     );
     await call("Page.navigate", { url: sitesOrigin }, sessionId);

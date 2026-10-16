@@ -160,8 +160,12 @@ export function createSitesWorker({ assets = {}, fetcher = fetch } = {}) {
         // These are injected by Sites dispatch, not identity claimed in cookies,
         // query/body, email, x-user-id or developer headers. Direct Worker ingress
         // must not be exposed; hosted spoof stripping must be verified before public.
-        const id = request.headers.get("oai-authenticated-user-id");
-        if (!id) {
+        // Match the official getChatGPTUser() identity-presence contract. Email
+        // is never an ownership key. Both headers are trusted only after Sites
+        // dispatch; checking their presence is not proof against direct ingress.
+        const id = request.headers.get("oai-authenticated-user-id"),
+          email = request.headers.get("oai-authenticated-user-email");
+        if (!id || !email) {
           if (path === "/" && request.method === "GET")
             return html(
               '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rosalyn · Sign in</title><main><h1>Rosalyn’s owner-only demo</h1><p>Game and orders require the owner’s ChatGPT login.</p><a href="/signin-with-chatgpt?return_to=%2F" target="_top">Sign in with ChatGPT</a></main></html>',
@@ -287,7 +291,8 @@ export function createSitesWorker({ assets = {}, fetcher = fetch } = {}) {
         if (request.method === "POST") {
           requireThat(
             request.headers.get("origin") === env.PUBLIC_ORIGIN &&
-              request.headers.get("x-csrf-token") === sess.csrf,
+              request.headers.get("x-csrf-token") === sess.csrf &&
+              sess.expires > Date.now(),
             "csrf_rejected",
             403,
           );
