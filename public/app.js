@@ -6,6 +6,7 @@ let busy = false;
 let gameSnapshot;
 let previewSku;
 let lastRecommendation;
+let pendingRecommendation;
 const names = {
   "rosalyn-gala": "Rosalyn Gala Outfit",
   "rosalyn-traveler": "Traveler’s Cloak",
@@ -99,6 +100,8 @@ function renderChoices() {
   $("#plan-details").open = false;
   $("#choice-goal").textContent = $("#goal").value;
   const g = scene.state;
+  const ko = lastRecommendation.dialogue?.language === "ko";
+  $("#choice-step").lang = ko ? "ko" : "en";
   const ownedFormal = g.previews.find(
     (p) => p.access === "owned" && p.dressCheck,
   );
@@ -107,22 +110,30 @@ function renderChoices() {
     story &&
     !lastRecommendation.interpretation.clarify &&
     !lastRecommendation.interpretation.avoidStyles.includes("formal");
-  $("#choice-note").textContent = offerFormal
+  const ownedChoice = lastRecommendation.plan.actions.find((a) =>
+    ["equip", "keep_owned"].includes(a.type) && g.owned.includes(a.sku));
+  $("#choice-note").textContent = lastRecommendation.dialogue?.text ?? (offerFormal
     ? "The same story is open for free. Buying is optional."
-    : (lastRecommendation.plan.actions[0]?.label ?? "Choose your next step.");
+    : (lastRecommendation.plan.actions[0]?.label ?? "Choose your next step."));
+  $("#ai-result-status").textContent = lastRecommendation.ai?.notice ??
+    (lastRecommendation.mode === "openai" ? "AI interpreted your goal; game rules checked the choices." : "Offline guide · no AI call.");
+  const freeLabel = ownedChoice || (offerFormal && ownedFormal)
+    ? ko ? "보유한 옷 입기 · 무료" : "Wear what I own · Free"
+    : offerFormal ? ko ? "무료로 빌리기" : "Borrow for free"
+      : ko ? "지금 옷 유지 · 무료" : "Keep my outfit · Free";
+  const canBrowse = lastRecommendation.products.length > 0;
   $("#choices").replaceChildren(
     button(
-      offerFormal
-        ? ownedFormal
-          ? "Wear what I own · Free"
-          : "Borrow for free"
-        : "Keep my outfit · Free",
+      freeLabel,
       () =>
-        offerFormal
+        ownedChoice ? previewAccess(ownedChoice.sku) : offerFormal
           ? previewAccess(ownedFormal?.sku ?? "borrowed")
           : showStage("world"),
     ),
-    button("Find a look to buy · Optional", () => {
+    button(canBrowse
+      ? ko ? "원하는 옷 살펴보기 · 구매는 선택" : "Find a look to buy · Optional"
+      : ko ? "안뜰 둘러보기 · 무료" : "Explore the courtyard · Free", () => {
+      if (!canBrowse) { showStage("world"); return; }
       $("#choice-step").hidden = true;
       $("#browse-step").hidden = false;
       $("#browse-step h1").tabIndex = -1;
@@ -609,10 +620,23 @@ function comparePaths(comparison) {
 $("#recommend").onsubmit = (e) => {
   e.preventDefault();
   run(async () => {
-    const result = await api("/api/commerce/agent/recommend", {
+    const input = {
       goal: $("#goal").value,
       budgetMinor: Math.round(Number($("#budget").value) * 100),
-    });
+    };
+    const signature = JSON.stringify(input);
+    if (pendingRecommendation?.signature !== signature)
+      pendingRecommendation = { signature, requestId: crypto.randomUUID() };
+    let result;
+    try {
+      result = await api("/api/commerce/agent/recommend", {
+        ...input, requestId: pendingRecommendation.requestId,
+      });
+    } catch (e) {
+      if (e.message === "ai_request_conflict") pendingRecommendation = undefined;
+      throw e;
+    }
+    if (result.ai?.reason !== "ai_request_pending") pendingRecommendation = undefined;
     $("#plan").replaceChildren(
       text("h3", "Your goal plan"),
       text(
@@ -684,9 +708,9 @@ async function boot() {
     session.aiMode === "openai"
       ? "Your goal and minimal game context are sent to OpenAI for this recommendation."
       : "Offline demo recommendations. No AI API is called.";
-  $("#ai-notice").hidden = session.aiMode !== "openai";
+  $("#ai-notice").hidden = false;
   $("#mode").textContent =
-    `${session.paymentMode.toUpperCase()} · AI: ${session.aiMode.toUpperCase()}${session.paymentMode === "mock" ? " · REHEARSAL" : ""}`;
+    `${session.paymentMode.toUpperCase()} · ${session.aiMode === "openai" ? "AI REQUESTS ENABLED" : "OFFLINE GUIDE"}${session.paymentMode === "mock" ? " · REHEARSAL" : ""}`;
   await refresh();
   $("#restore-summary").textContent =
     `Server-saved wardrobe and quest progress loaded for this session. ${savedSummary(scene.state)} Reopening starts you in the courtyard; movement and typed goals are not saved. Keep the same unexpired browser session to resume.`;

@@ -1,4 +1,4 @@
-import { AI_COST_POLICY } from "./ai-cost.js";
+import { AI_COST_POLICY } from "./ai-policy.js";
 import { CommerceError } from "./catalog.js";
 // Fixed error vocabulary only: never serialize provider text, headers, URLs or causes.
 const kinds = Object.freeze({
@@ -24,6 +24,7 @@ const kinds = Object.freeze({
   external_budget_exhausted: "budget",
   external_concurrency_exhausted: "budget",
   external_budget_policy_mismatch: "configuration",
+  budget_policy_mismatch: "configuration",
   ai_call_budget_exhausted: "budget",
   compatibility_semantics_failed: "compatibility",
   evaluation_failed: "internal",

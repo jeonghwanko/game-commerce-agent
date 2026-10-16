@@ -1,6 +1,5 @@
 import { catalog, requireThat, CommerceError } from "../src/catalog.js";
-import { offlineIntent } from "../src/intent.js";
-import { recommendationPlan } from "../src/recommendation-plan.js";
+import { sitesAIMode, sitesRecommend } from "./ai.js";
 import { lookPreviews } from "../src/story-preview.js";
 import { PayPalSandboxProvider, SANDBOX } from "../src/providers/paypal.js";
 import { D1Ledger, D1WindowBudget, uuid } from "./d1.js";
@@ -122,7 +121,11 @@ function providerFor(s, env, fetcher) {
 }
 // assets is supplied by the supported Sites build integration, never from a public
 // ASSETS fallback before this handler. Unit tests inject local static bytes.
-export function createSitesWorker({ assets = {}, fetcher = fetch } = {}) {
+export function createSitesWorker({
+  assets = {},
+  fetcher = fetch,
+  aiTimeoutMs = 10000,
+} = {}) {
   return {
     async fetch(request, env) {
       try {
@@ -255,7 +258,7 @@ export function createSitesWorker({ assets = {}, fetcher = fetch } = {}) {
             return json({
               csrf: sess.csrf,
               paymentMode: mode,
-              aiMode: "mock",
+              aiMode: sitesAIMode(env),
               authMode: "principal",
               gameHost: "independent-sandbox-demo",
             });
@@ -320,11 +323,9 @@ export function createSitesWorker({ assets = {}, fetcher = fetch } = {}) {
               "invalid_budget",
             );
             return json(
-              recommendationPlan(
-                offlineIntent(b.goal),
-                b.budgetMinor,
-                await game.state(user),
-                "mock",
+              await sitesRecommend(
+                s, env, user, b, await game.state(user), fetcher, aiTimeoutMs,
+                () => game.state(user),
               ),
             );
           }

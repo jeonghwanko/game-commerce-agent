@@ -15,6 +15,7 @@ export class Recommender {
     fetcher = fetch,
     timeoutMs = 15000,
     maxCalls = 100,
+    reasoningEffort,
   } = {}) {
     requireThat(["mock", "openai"].includes(mode), "invalid_ai_mode");
     if (mode === "openai")
@@ -28,7 +29,13 @@ export class Recommender {
         maxCalls <= 1000,
       "invalid_ai_limits",
     );
-    Object.assign(this, { mode, key, model, fetcher, timeoutMs, maxCalls });
+    requireThat(
+      reasoningEffort === undefined || reasoningEffort === "none",
+      "invalid_ai_limits",
+    );
+    Object.assign(this, {
+      mode, key, model, fetcher, timeoutMs, maxCalls, reasoningEffort,
+    });
     this.calls = 0;
   }
   async recommend({ goal, budgetMinor }, context, { onUsage } = {}) {
@@ -61,6 +68,10 @@ export class Recommender {
             },
             body: JSON.stringify({
               model: this.model,
+              store: false,
+              ...(this.reasoningEffort
+                ? { reasoning_effort: this.reasoningEffort }
+                : {}),
               max_completion_tokens: 250,
               service_tier: "default",
               messages: [
@@ -82,6 +93,11 @@ export class Recommender {
                       seal: context.seal,
                       rumor: context.rumor,
                       borrowed: context.borrowed,
+                      formal: context.formal,
+                      owned: catalog
+                        .filter((p) => context.owned.includes(p.sku))
+                        .map((p) => p.name),
+                      equipped: context.equipped ?? null,
                     },
                   }),
                 },

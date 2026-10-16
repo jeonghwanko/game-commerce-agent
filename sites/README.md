@@ -1,4 +1,11 @@
-# Sites adapter — offline verified, hosted deployment blocked
+# Sites adapter — implementation and verification boundaries
+
+The registration/deployment history below describes the original adapter handoff.
+For current local changes see [owner/CSRF validation](../docs/sites-access-validation.md)
+and [Rosalyn AI dialogue](../docs/sites-ai-dialogue.md). These branches do not
+change the existing Site's sharing, secrets or deployment. The supplied private
+owner screenshot and platform-gate checks are distinct from application-layer
+public-mode verification.
 
 This is a separate asynchronous Worker/D1 adapter for the existing public game, not a relaxation of the Node host's production guard. It reuses the canonical catalog, interpretation/planning functions, projected outfit/NPC previews, OneSub MIT entitlement evaluator, public scene/UI and actual Sandbox PayPal adapter. The Node HTTP/SQLite server remains unchanged. The shared PayPal adapter uses the standard inspection symbol instead of importing Node's inspection utility; recommendation response construction is now a shared transport-free function.
 
@@ -17,13 +24,13 @@ The Sites skill requires its `project-setup.mjs`, `site-workflow.mjs` and suppor
 
 ## Owner access before public ingress
 
-Sites dispatch owns ChatGPT sign-in and injects the Site-scoped `oai-authenticated-user-id`. The adapter uses that ID, never a query/body `userId`, email, bearer bypass credential or arbitrary developer header. `SITES_OWNER_USER_ID` is an explicit server-side equality allowlist. Missing configuration fails closed. No first-visitor enrollment or new authentication stack is implemented.
+Sites dispatch owns ChatGPT sign-in and injects the Site-scoped `oai-authenticated-user-id` and email. The adapter requires the complete pair, as the official starter does, and authorizes only by that ID, never a query/body `userId`, email, bearer bypass credential or arbitrary developer header. `SITES_OWNER_USER_ID` is an explicit server-side equality allowlist. Missing configuration fails closed. No first-visitor enrollment or new authentication stack is implemented.
 
 All game HTML/JS/CSS and game/order APIs require the configured owner. Anonymous `/` returns only a sign-in page with a top-level `/signin-with-chatgpt?return_to=%2F` anchor; it does not serve the game. Anonymous application APIs fail 401, other signed-in IDs fail 403. JSON writes additionally require exact Origin plus a one-hour server-side CSRF value. API responses and protected assets are no-store.
 
 A non-game, signed-in `/api/setup/identity` readout returns only the current visitor's own Site-scoped ID. It does not store/bind that ID or grant access. While the Site is still **owner-private**, its owner can read that value and enter it directly in Settings as `SITES_OWNER_USER_ID`. Account-level IDs in `get_site`, emails and local test identities must not be substituted. After binding, verify owner success, anonymous denial, a second user's denial, forged-header stripping at Sites dispatch, protected asset denial and CSRF rejection on the actual private deployment. Local Request tests only simulate trusted dispatch headers; they do **not** establish hosted header spoof protection. Do not expose a direct Worker ingress that bypasses dispatch.
 
-**Do not make the Site public before those hosted access checks pass.** Then the already-authorized public HTTPS audience can be selected, retaining application owner checks. Only `POST /api/paypal/webhooks` is an anonymous business endpoint; it must verify the signature and provider/capture/order details before any grant. Do not put browser-login middleware in front of that callback, and do not expose an alternate unsigned callback. A private Site cannot receive PayPal's anonymous notifications.
+Follow the [controlled same-Site validation sequence](../docs/sites-access-validation.md) before public operation. Private-gate denials cannot test the public dispatch boundary. The initial public-mode verification must keep all protected content closed with an unset owner binding and all payment/AI calls disabled; restore the owner binding only after dispatch checks pass. Only `POST /api/paypal/webhooks` is an anonymous business endpoint; it must verify the signature and provider/capture/order details before any grant. Do not put browser-login middleware in front of that callback, and do not expose an alternate unsigned callback. A private Site cannot receive PayPal's anonymous notifications.
 
 ## Settings the user enters directly
 
@@ -42,7 +49,14 @@ The [official Sites settings documentation](https://learn.chatgpt.com/docs/sites
 | `PAYPAL_BASE_URL`                          | Omit; only `https://api-m.sandbox.paypal.com` is accepted if supplied.                                                                                             |
 | D1 binding `DB`                            | Provisioned/configured by the supported Sites workflow, not a pasted credential. Stop if a paid provisioning step or new permission is required.                   |
 
-There is no OpenAI setting to supply for this phase: recommendation is **mock**, with no AI transport in the Worker dependency graph. No provider traffic occurs on import, UI load, session, preview or free quests. Missing Sandbox enablement blocks even the anonymous callback before OAuth. Keys are read only by the configured payment path after owner checks (or the explicitly enabled webhook path).
+Recommendation defaults to **mock/offline**. The optional Sites AI implementation
+and its explicit enablement/budget variables are described in
+[the AI handoff](../docs/sites-ai-dialogue.md); no key or spending permission is
+assumed. No provider traffic occurs on import, UI load, session, preview or free
+quests. Missing Sandbox enablement blocks even the anonymous callback before
+OAuth. Keys are accessed only on their explicitly enabled paths after required
+authorization. The AI request table migration is schema-only and has not been
+applied to the hosted Site.
 
 A provider+merchant marker binds purchase data to its environment. Never switch a mock ledger to real Sandbox or a seller to another seller; this fails closed even on game reads so mock rights cannot survive a mode change. The default `unconfigured` free path creates **no payment marker or mock entitlements**, so later first-time Sandbox configuration can preserve free story progress. If a mock ledger was deliberately used, a separately provisioned empty payment/demo database is required; do not delete the marker or rights to evade the guard.
 
