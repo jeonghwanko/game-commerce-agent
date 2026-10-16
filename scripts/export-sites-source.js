@@ -35,7 +35,10 @@ for (const name of [
   "THIRD_PARTY_NOTICES.md",
   "src/vendor/onesub/LICENSE",
   "sites/migrations/0001_commerce.sql",
+  "sites/migrations/0002_ai_requests.sql",
   "sites/README.md",
+  "docs/sites-ai-dialogue.md",
+  "docs/sites-access-validation.md",
 ]) {
   const out = resolve(destination, name);
   await mkdir(dirname(out), { recursive: true });

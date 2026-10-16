@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import http from "node:http";
 import { createSitesWorker } from "../sites/worker.js";
 import { sqliteD1 } from "../sites/testing/d1-fixture.js";
+import { SITES_AI_POLICY } from "../sites/ai.js";
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -622,12 +623,21 @@ try {
       ]),
     ),
   );
-  let sites = createSitesWorker({
-    assets: sitesAssets,
-    fetcher: () => {
-      throw Error("provider_network_forbidden");
-    },
-  });
+  let aiRequests = 0, failAI = false;
+  const sitesFetch = async (url) => {
+    // Fake HTTP for the real interpreter path; never forward to any provider.
+    assert.equal(url, SITES_AI_POLICY.endpoint);
+    aiRequests++;
+    if (failAI) return new Response("synthetic provider failure", { status: 503 });
+    return Response.json({
+      model: SITES_AI_POLICY.model, service_tier: "default",
+      usage: { prompt_tokens: 100, completion_tokens: 80, total_tokens: 180 },
+      choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+        goals: ["story"], style: "any", avoidStyles: [], spending: "optional", clarify: false,
+      }) } }],
+    });
+  };
+  let sites = createSitesWorker({ assets: sitesAssets, fetcher: sitesFetch });
   const sitesEnv = {
     PUBLIC_ORIGIN: sitesOrigin,
     SITES_OWNER_USER_ID: "synthetic-site-owner",
@@ -659,14 +669,20 @@ try {
     assert.equal(
       (
         await fetch(sitesOrigin + "/app.js", {
-          headers: { "oai-authenticated-user-id": "other-user" },
+          headers: {
+            "oai-authenticated-user-id": "other-user",
+            "oai-authenticated-user-email": "other@example.invalid",
+          },
         })
       ).status,
       403,
     );
     await call(
       "Network.setExtraHTTPHeaders",
-      { headers: { "oai-authenticated-user-id": "synthetic-site-owner" } },
+      { headers: {
+        "oai-authenticated-user-id": "synthetic-site-owner",
+        "oai-authenticated-user-email": "owner@example.invalid",
+      } },
       sessionId,
     );
     await call("Page.navigate", { url: sitesOrigin }, sessionId);
@@ -691,9 +707,7 @@ try {
     await completeStory(true);
     sites = createSitesWorker({
       assets: sitesAssets,
-      fetcher: () => {
-        throw Error("provider_network_forbidden");
-      },
+      fetcher: sitesFetch,
     });
     await call("Page.reload", {}, sessionId);
     await wait("scene.state.canEnter===true");
@@ -714,6 +728,36 @@ try {
     console.log(
       "PASS Sites Worker+D1 contract fixture: non-owner denial; unconfigured payment preview; 390px/200% and Tab/Enter free story; restart recovery. Synthetic identity, no hosted authentication or real payments.",
     );
+    assert.equal(aiRequests, 0);
+    Object.assign(sitesEnv, {
+      AI_MODE: "openai", AI_REQUESTS_ENABLED: "true", AI_MODEL: SITES_AI_POLICY.model,
+      AI_MAX_CALLS: "2", AI_BUDGET_USD: "0.02", OPENAI_API_KEY: "synthetic-browser-key",
+    });
+    await call("Page.reload", {}, sessionId);
+    await wait("session?.aiMode==='openai'");
+    await evaluate("openGoal(); document.querySelector('#goal').value='무료로 무도회에 가고 싶어'; document.querySelector('#budget').value='0'; document.querySelector('#recommend').requestSubmit(); document.querySelector('#recommend').requestSubmit();");
+    await wait("lastRecommendation?.ai?.status==='live'");
+    assert.equal(aiRequests, 1, "double submit starts only one synthetic interpretation");
+    assert.equal(await evaluate("lastRecommendation.dialogue.language"), "ko");
+    assert.match(await evaluate("document.querySelector('#choice-note').textContent"), /무료|복장/);
+    assert.equal(await evaluate("document.querySelector('#choice-step').lang"), "ko");
+    assert.equal(await evaluate("document.querySelectorAll('#choices button').length"), 2);
+    assert.equal(await evaluate("lastRecommendation.products.length"), 0);
+    await layout();
+    failAI = true;
+    await evaluate("openGoal(); document.querySelector('#goal').value='A gala outfit for the gathering'; document.querySelector('#budget').value='3'; document.querySelector('#recommend').requestSubmit();");
+    await wait("lastRecommendation?.mode==='fallback'");
+    assert.match(await evaluate("document.querySelector('#ai-result-status').textContent"), /AI is unavailable/);
+    assert.equal(await evaluate("lastRecommendation.products.length"), 0);
+    assert.equal(aiRequests, 2);
+    failAI = false;
+    await evaluate("openGoal(); document.querySelector('#recommend').requestSubmit();");
+    await wait("lastRecommendation?.ai?.reason==='external_budget_exhausted'");
+    assert.equal(aiRequests, 2, "persistent cap blocks another provider request");
+    assert.equal(sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_quotes").get().n, 0);
+    assert.equal(sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_orders").get().n, 0);
+    assert.equal(sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_entitlements").get().n, 0);
+    console.log("PASS Sites AI dialogue: fake HTTP only; Korean free/zero-budget reply; two choices; double submit; explicit English fallback; durable cost cap; no purchases or paid API traffic.");
   } finally {
     await new Promise((r) => sitesServer.close(r));
     sitesDB.close();

@@ -67,15 +67,20 @@ function workerFixture(
   };
   let csrf;
   const call = async (path, body, headers = {}) => {
+    const requestHeaders = new Headers({
+      "oai-authenticated-user-id": "owner-site-id",
+      "oai-authenticated-user-email": "owner@example.invalid",
+      "content-type": "application/json",
+      origin: env.PUBLIC_ORIGIN,
+      ...(csrf ? { "x-csrf-token": csrf } : {}),
+    });
+    for (const [name, value] of Object.entries(headers)) {
+      if (value === null) requestHeaders.delete(name);
+      else requestHeaders.set(name, value);
+    }
     const req = new Request(env.PUBLIC_ORIGIN + path, {
       method: body === undefined ? "GET" : "POST",
-      headers: {
-        "oai-authenticated-user-id": "owner-site-id",
-        "content-type": "application/json",
-        origin: env.PUBLIC_ORIGIN,
-        ...(csrf ? { "x-csrf-token": csrf } : {}),
-        ...headers,
-      },
+      headers: requestHeaders,
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     return worker.fetch(req, env);
@@ -135,6 +140,205 @@ test("Sites: owner ID is explicit; anonymous and other users cannot load game/as
     f.db.sqlite.prepare("SELECT count(*) n FROM sites_sessions").get().n,
     0,
   );
+  assert.equal(f.calls, 0);
+});
+
+test("Sites: complete dispatch identity is required; alternate identity claims never select the owner", async (t) => {
+  const f = workerFixture(t);
+  const claims = {
+    "x-user-id": "owner-site-id",
+    "x-authenticated-user-id": "owner-site-id",
+    "x-developer-user-id": "owner-site-id",
+    "x-forwarded-user": "owner-site-id",
+    "oai-authenticated-user-email": "owner@example.invalid",
+    "oai-authenticated-user-full-name": "owner-site-id",
+    cookie: "userId=owner-site-id; __sites_local_auth=1",
+    authorization: "Bearer synthetic-not-a-session",
+  };
+  const attempts = [
+    [401, { ...claims, "oai-authenticated-user-id": null }],
+    [401, { "oai-authenticated-user-email": null }],
+    [401, { "oai-authenticated-user-email": "" }],
+    [403, { ...claims, "oai-authenticated-user-id": "other-site-id" }],
+    [403, { ...claims, "oai-authenticated-user-id": "OWNER-SITE-ID" }],
+    [403, { "oai-authenticated-user-id": "owner-site-id, other-site-id" }],
+    [403, { "oai-authenticated-user-id": "other-site-id, owner-site-id" }],
+    [403, { "oai-authenticated-user-id": "owner-site-id, owner-site-id" }],
+  ];
+  for (const [expected, headers] of attempts) {
+    for (const path of [
+      "/", "/app.js", "/scene.js", "/style.css", "/api/session",
+      "/api/game", "/api/commerce/catalog", "/api/commerce/entitlements",
+      "/api/commerce/orders", "/api/analytics/funnel",
+    ]) {
+      const r = await f.call(path, undefined, headers);
+      assert.equal(r.status, expected, path);
+      assert.equal(r.headers.get("cache-control"), "no-store");
+    }
+    for (const path of [
+      "/api/game/interact", "/api/game/quest", "/api/game/equip",
+      "/api/commerce/quotes", "/api/commerce/orders",
+      "/api/commerce/agent/recommend",
+      "/api/commerce/orders/00000000-0000-0000-0000-000000000000/capture",
+    ])
+      assert.equal((await f.call(path, {}, headers)).status, expected, path);
+  }
+  for (const table of ["sites_sessions", "sites_game", "sites_orders", "sites_quotes"])
+    assert.equal(f.db.sqlite.prepare(`SELECT count(*) n FROM ${table}`).get().n, 0);
+  assert.equal(f.calls, 0);
+
+  // These are trusted-dispatch inputs in a unit test, not a hosted spoof test.
+  // Email is required to match the starter contract but never selects the owner.
+  assert.equal((await f.call("/", undefined, {
+    "OAI-Authenticated-User-Id": "owner-site-id",
+    "oai-authenticated-user-email": "renamed@example.invalid",
+  })).status, 200);
+});
+
+test("Sites: setup readout cannot enroll an owner or create sessions", async (t) => {
+  const f = workerFixture(t);
+  delete f.env.SITES_OWNER_USER_ID;
+  assert.equal((await f.call("/api/setup/identity", undefined, {
+    "oai-authenticated-user-email": null,
+  })).status, 401);
+  for (const id of ["first-visitor", "owner-site-id"]) {
+    const headers = { "oai-authenticated-user-id": id };
+    const setup = await (await f.call("/api/setup/identity", undefined, headers)).json();
+    assert.equal(setup.siteUserId, id);
+    assert.equal(setup.configured, false);
+    assert.equal((await f.call("/", undefined, headers)).status, 503);
+    assert.equal((await f.call("/api/game", undefined, headers)).status, 503);
+    assert.equal(f.env.SITES_OWNER_USER_ID, undefined);
+  }
+  f.env.SITES_OWNER_USER_ID = "owner-site-id";
+  assert.equal((await f.call("/api/game", undefined, {
+    "oai-authenticated-user-id": "first-visitor",
+  })).status, 403);
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_sessions").get().n, 0);
+  assert.equal(f.calls, 0);
+});
+
+test("Sites: missing/wrong CSRF and missing/null/foreign Origin reject before game writes", async (t) => {
+  const f = workerFixture(t);
+  await f.login();
+  for (const headers of [
+    { "x-csrf-token": null },
+    { "x-csrf-token": "" },
+    { "x-csrf-token": "wrong-synthetic-value" },
+    { origin: null },
+    { origin: "null" },
+    { origin: "https://evil.invalid" },
+    { origin: f.env.PUBLIC_ORIGIN + "/" },
+    { origin: f.env.PUBLIC_ORIGIN + ".evil.invalid" },
+  ]) {
+    const r = await f.call("/api/game/interact", { npc: "seal" }, headers);
+    assert.equal(r.status, 403);
+    assert.deepEqual(await r.json(), { error: "csrf_rejected" });
+    assert.equal(r.headers.get("cache-control"), "no-store");
+  }
+  for (const table of ["sites_challenges", "sites_game", "sites_events", "sites_quotes", "sites_orders"])
+    assert.equal(f.db.sqlite.prepare(`SELECT count(*) n FROM ${table}`).get().n, 0);
+  assert.equal((await f.call("/api/game/interact", { npc: "seal" })).status, 200);
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_challenges").get().n, 1);
+  assert.equal(f.calls, 0);
+});
+
+test("Sites: CSRF expires at one hour, rotates, and rejects the old value after restart", async (t) => {
+  const now = 2000000000000;
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const f = workerFixture(t);
+  const old = (await f.login()).j.csrf;
+  t.mock.timers.setTime(now + 3600000 - 1);
+  assert.equal((await f.login()).j.csrf, old);
+  t.mock.timers.setTime(now + 3600000);
+  const expired = await f.call("/api/game/interact", { npc: "seal" });
+  assert.equal(expired.status, 403);
+  assert.deepEqual(await expired.json(), { error: "csrf_rejected" });
+  const fresh = (await f.login()).j.csrf;
+  assert.notEqual(fresh, old);
+  f.restart();
+  assert.equal((await f.login()).j.csrf, fresh);
+  assert.equal((await f.call("/api/game/interact", { npc: "seal" }, {
+    "x-csrf-token": old,
+  })).status, 403);
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_challenges").get().n, 0);
+  assert.equal((await f.call("/api/game/interact", { npc: "seal" })).status, 200);
+  assert.equal(f.calls, 0);
+});
+
+test("Sites: CSRF that expires during an awaited database read cannot authorize a write", async (t) => {
+  const now = 2000000000000;
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const f = workerFixture(t);
+  await f.login();
+  f.db.before = async (sql) => {
+    if (sql.startsWith("SELECT value FROM sites_environment"))
+      t.mock.timers.setTime(now + 3600000);
+  };
+  const r = await f.call("/api/game/interact", { npc: "seal" });
+  assert.equal(r.status, 403);
+  assert.deepEqual(await r.json(), { error: "csrf_rejected" });
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_challenges").get().n, 0);
+  assert.equal(f.calls, 0);
+});
+
+test("Sites: changing the configured owner revokes the old principal and isolates CSRF sessions", async (t) => {
+  const f = workerFixture(t);
+  const old = (await f.login()).j.csrf;
+  f.env.SITES_OWNER_USER_ID = "new-owner-site-id";
+  assert.equal((await f.call("/api/game")).status, 403);
+  assert.equal((await f.call("/api/game/interact", { npc: "seal" })).status, 403);
+  const identity = {
+    "oai-authenticated-user-id": "new-owner-site-id",
+    "oai-authenticated-user-email": "new-owner@example.invalid",
+  };
+  const session = await (await f.call("/api/session", undefined, identity)).json();
+  assert.notEqual(session.csrf, old);
+  assert.equal((await f.call("/api/game/interact", { npc: "seal" }, identity)).status, 403);
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_challenges").get().n, 0);
+  assert.equal((await f.call("/api/game/interact", { npc: "seal" }, {
+    ...identity, "x-csrf-token": session.csrf,
+  })).status, 200);
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_sessions").get().n, 2);
+  assert.equal(f.calls, 0);
+});
+
+test("Sites: claimed query/body identities cannot override dispatch, even with valid CSRF", async (t) => {
+  const f = workerFixture(t);
+  await f.login();
+  for (const key of ["userId", "user_id"]) {
+    assert.equal((await f.call(`/api/game?${key}=owner-site-id`)).status, 400);
+    assert.equal((await f.call("/api/game/interact", {
+      npc: "seal", [key]: "owner-site-id",
+    })).status, 400);
+    const other = { "oai-authenticated-user-id": "other-site-id" };
+    assert.equal((await f.call(`/api/game?${key}=owner-site-id`, undefined, other)).status, 403);
+    assert.equal((await f.call("/api/game/interact", {
+      npc: "seal", [key]: "owner-site-id",
+    }, other)).status, 403);
+  }
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_challenges").get().n, 0);
+  assert.equal(f.calls, 0);
+});
+
+test("Sites: public callback stays anonymous-compatible but disabled before secret access or transport", async (t) => {
+  const f = workerFixture(t);
+  for (const key of ["PAYPAL_OAUTH_BASIC_AUTH_HEADER", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET"])
+    Object.defineProperty(f.env, key, { get() { throw Error("secret_access_forbidden"); } });
+  for (const mode of ["unconfigured", "paypal-sandbox"]) {
+    f.env.PAYMENT_PROVIDER = mode;
+    f.env.SANDBOX_PAYMENTS_ENABLED = "false";
+    const r = await f.call("/api/paypal/webhooks", {}, {
+      "oai-authenticated-user-id": null,
+      "oai-authenticated-user-email": null,
+      origin: null,
+      "x-csrf-token": null,
+    });
+    assert.equal(r.status, 503);
+    assert.deepEqual(await r.json(), { error: "payments_not_configured" });
+  }
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_sessions").get().n, 0);
+  assert.equal(f.db.sqlite.prepare("SELECT count(*) n FROM sites_environment").get().n, 0);
   assert.equal(f.calls, 0);
 });
 

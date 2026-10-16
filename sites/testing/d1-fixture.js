@@ -5,13 +5,15 @@ import { readFileSync } from "node:fs";
 export function sqliteD1(path = ":memory:", migrate = true) {
   const sqlite = new DatabaseSync(path);
   sqlite.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
-  if (migrate)
+  if (migrate) {
     sqlite.exec(
       readFileSync(
         new URL("../migrations/0001_commerce.sql", import.meta.url),
         "utf8",
       ),
     );
+    sqlite.exec(readFileSync(new URL("../migrations/0002_ai_requests.sql", import.meta.url), "utf8"));
+  }
   const fixture = {
     sqlite,
     sessions: [],

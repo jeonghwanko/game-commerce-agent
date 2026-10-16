@@ -92,7 +92,7 @@ export class D1WindowBudget {
       now = this.now();
     const result = await s.batch([
       [
-        "UPDATE sites_budgets SET used=0,started=? WHERE name=? AND started+window_ms<=?",
+        "UPDATE sites_budgets SET used=0,started=? WHERE name=? AND window_ms>0 AND started+window_ms<=?",
         now,
         name,
         now,
