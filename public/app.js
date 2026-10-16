@@ -398,6 +398,13 @@ async function select(p) {
   resetFittingRoom();
   await refresh();
   preview(p.sku);
+  if (session.paymentMode === "unconfigured") {
+    $("#quote").textContent =
+      "Preview only. Sandbox payments are not configured; the free story route remains available.";
+    $("#status").textContent = "No payment request was sent.";
+    $("#quote").focus();
+    return;
+  }
   const q = await api("/api/commerce/quotes", { sku: p.sku });
   $("#quote").replaceChildren(
     text("h3", p.name),

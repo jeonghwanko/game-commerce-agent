@@ -1,6 +1,9 @@
 // Uses an installed Chromium and native CDP; no browser package/download required.
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
+import { createSitesWorker } from "../sites/worker.js";
+import { sqliteD1 } from "../sites/testing/d1-fixture.js";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -600,6 +603,120 @@ try {
   } finally {
     await new Promise((r) => demo.server.close(r));
     demoStore.close();
+  }
+  // Portable Sites adapter QA. These identity headers are synthetic, not a
+  // claim that hosted ChatGPT dispatch or spoof stripping has been verified.
+  const sitesDB = sqliteD1();
+  const sitesOrigin = `http://127.0.0.1:${port + 11}`;
+  const sitesAssets = Object.fromEntries(
+    await Promise.all(
+      ["/", "/app.js", "/scene.js", "/style.css"].map(async (path) => [
+        path,
+        await readFile(
+          new URL(
+            `../public/${path === "/" ? "index.html" : path.slice(1)}`,
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ]),
+    ),
+  );
+  let sites = createSitesWorker({
+    assets: sitesAssets,
+    fetcher: () => {
+      throw Error("provider_network_forbidden");
+    },
+  });
+  const sitesEnv = {
+    PUBLIC_ORIGIN: sitesOrigin,
+    SITES_OWNER_USER_ID: "synthetic-site-owner",
+    DB: sitesDB,
+  };
+  const sitesServer = http.createServer(async (req, res) => {
+    try {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = Buffer.concat(chunks);
+      const response = await sites.fetch(
+        new Request(sitesOrigin + req.url, {
+          method: req.method,
+          headers: req.headers,
+          ...(body.length ? { body } : {}),
+        }),
+        sitesEnv,
+      );
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      res.end(await response.text());
+    } catch {
+      res.writeHead(500);
+      res.end("fixture_failed");
+    }
+  });
+  await new Promise((r) => sitesServer.listen(port + 11, "127.0.0.1", r));
+  try {
+    assert.equal((await fetch(sitesOrigin + "/api/session")).status, 401);
+    assert.equal(
+      (
+        await fetch(sitesOrigin + "/app.js", {
+          headers: { "oai-authenticated-user-id": "other-user" },
+        })
+      ).status,
+      403,
+    );
+    await call(
+      "Network.setExtraHTTPHeaders",
+      { headers: { "oai-authenticated-user-id": "synthetic-site-owner" } },
+      sessionId,
+    );
+    await call("Page.navigate", { url: sitesOrigin }, sessionId);
+    await wait("session?.paymentMode==='unconfigured'");
+    await viewport(390, 844);
+    await evaluate("document.documentElement.style.zoom='2'");
+    await tabButton("Show my choices");
+    await tabButton("Find a look to buy");
+    await tabButton("Preview / Review purchase");
+    assert.match(
+      await evaluate("document.getElementById('quote').textContent"),
+      /not configured/,
+    );
+    assert.equal(
+      await evaluate("document.querySelectorAll('#quote button').length"),
+      0,
+    );
+    await layout();
+    await tabTo("#back-preview");
+    await tabButton("Borrow for free");
+    await tabButton("Confirm free loan");
+    await completeStory(true);
+    sites = createSitesWorker({
+      assets: sitesAssets,
+      fetcher: () => {
+        throw Error("provider_network_forbidden");
+      },
+    });
+    await call("Page.reload", {}, sessionId);
+    await wait("scene.state.canEnter===true");
+    assert.deepEqual(await evaluate("scene.state.owned"), []);
+    assert.equal(
+      sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_orders").get().n,
+      0,
+    );
+    assert.equal(
+      sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_entitlements").get()
+        .n,
+      0,
+    );
+    assert.equal(
+      sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_quotes").get().n,
+      0,
+    );
+    console.log(
+      "PASS Sites Worker+D1 contract fixture: non-owner denial; unconfigured payment preview; 390px/200% and Tab/Enter free story; restart recovery. Synthetic identity, no hosted authentication or real payments.",
+    );
+  } finally {
+    await new Promise((r) => sitesServer.close(r));
+    sitesDB.close();
   }
   console.log(
     "PASS simplified goal → two choices → preview → explicit confirmation; free/owned/paid paths; no preview mutation; quote isolation; lost create/capture response and delayed notification; cancellation/reload/repeated restoration; desktop/390px/200% CSS reflow; Tab/Enter free route; authenticated demo. MOCK only.",
