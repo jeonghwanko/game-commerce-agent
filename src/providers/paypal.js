@@ -1,4 +1,3 @@
-import { inspect } from "node:util";
 import { CommerceError, money, requireThat } from "../catalog.js";
 import {
   eventReference,
@@ -57,7 +56,7 @@ export class PayPalSandboxProvider {
       authorization: "[REDACTED]",
     };
   }
-  [inspect.custom]() {
+  [Symbol.for("nodejs.util.inspect.custom")]() {
     return this.toJSON();
   }
   async token() {

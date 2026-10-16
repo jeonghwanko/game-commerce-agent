@@ -6,8 +6,7 @@ import {
   offlineIntent,
   INTENT_SYSTEM_PROMPT,
 } from "./intent.js";
-import { planGoal } from "./planner.js";
-import { storyComparison } from "./story-preview.js";
+import { recommendationPlan } from "./recommendation-plan.js";
 export class Recommender {
   constructor({
     mode = "mock",
@@ -145,22 +144,6 @@ export class Recommender {
       }
       intent = validateIntent(parsed);
     }
-    const plan = planGoal(intent, budgetMinor, context, catalog);
-    const available = catalog.filter((p) => plan.eligibleSkus.includes(p.sku));
-    // Model text, price and effects are never rendered as authoritative product data.
-    return {
-      mode: this.mode,
-      interpretation: intent,
-      products: available,
-      comparison: storyComparison(plan, context, catalog, budgetMinor),
-      plan: {
-        goal: plan.goal,
-        projected: plan.projected,
-        strategy: plan.strategy,
-        reason: plan.reason,
-        actions: plan.actions,
-      },
-      freeAlternative: plan.freeAlternative,
-    };
+    return recommendationPlan(intent, budgetMinor, context, this.mode);
   }
 }

@@ -2,6 +2,8 @@
 
 Status: mock unit, HTTP, transport-contract and browser paths are exercised. **Real Sandbox payment, real signed webhook delivery and real AI response are not yet verified.** Do not present mock output as PayPal/AI evidence.
 
+For the minimal next payment stage (mock AI, memory-only user handoff), follow [User-operated Sandbox payment](user-sandbox-payment.md). The general configuration below also describes a separately authorized broader AI integration; it is not a direction to enable real AI for this stage.
+
 ## Prerequisites requiring owner action
 
 Use an existing approved PayPal Sandbox application and approved AI account. Do not create credentials, expand scopes, subscribe to paid services, publish a tunnel, deploy or accept terms without owner authorization.
@@ -103,7 +105,7 @@ The synthetic fetch test proves the exact string passed by this application, inc
 
 ## Independent sandbox demo host
 
-This optional entrypoint connects the original public scene to authenticated test principals and server-owned quests. It is **not private-game integration**. No access secret is generated or configured by this work. After operator approval/configuration, supply `SANDBOX_DEMO_HOST_ENABLED=true`, `DEMO_ACCESS_USER` (existing ASCII test username) and `DEMO_ACCESS_PASSWORD` (operator-provided test access value of at least 24 characters), plus a dedicated persistent `DATABASE_PATH`, then run `node --env-file=.env src/sandbox-demo.js`. Do not enable it speculatively. `npm start` retains its existing mode. The explicit host rejects `NODE_ENV=production` and non-HTTPS origins except localhost/loopback.
+This optional entrypoint connects the original public scene to authenticated test principals and server-owned quests. It is **not private-game integration**. No access secret is generated or configured by this work. After operator approval/configuration, supply `SANDBOX_DEMO_HOST_ENABLED=true`, `DEMO_ACCESS_USER` (existing ASCII test username) and `DEMO_ACCESS_PASSWORD` (operator-provided test access value of at least 24 characters), plus a dedicated persistent `DATABASE_PATH`, then explicitly start the configured mock host with `node src/sandbox-demo.js --start`. For the payment-only stage, use the [user-operated Sandbox walkthrough](user-sandbox-payment.md): `--start --confirm-sandbox-requests`, mock AI, an existing approved HTTPS webhook route, and `SANDBOX_WEBHOOK_ROUTE_READY=true` are required. Running with no arguments or `--check` prints only a public offline checklist. This stage uses user-only memory configuration rather than credential files. Do not enable it speculatively. `npm start` retains its existing mode. The explicit host rejects `NODE_ENV=production` and non-HTTPS origins except localhost/loopback.
 
 The browser authenticates with HTTP Basic over the approved HTTPS origin (loopback allowed for local tests). Every API request revalidates the configured access credential; there is no anonymous session issuance or user-ID override. Only a digest is retained by the verifier. One configured test identity is supported per host; this is not a public identity service. Re-login and process restart keep its principal mapping and progress. The server keeps CSRF state for one hour; after expiry, reload to refresh it. To revoke/rotate access, stop all workers and replace the operator configuration, then restart; keep the same username for the same principal. Do not expose credentials or capture browser authentication prompts in videos. The production/private host still requires its own authentication verifier.
 
