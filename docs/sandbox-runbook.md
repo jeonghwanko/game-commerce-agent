@@ -97,6 +97,8 @@ Choose exactly one mode:
 
 User-only setup after the parent confirms readiness: open the environment's Network secrets editor; use key `PAYPAL_OAUTH_BASIC_AUTH_HEADER`, enter an already prepared complete OAuth Authorization value directly in the secure value field, and limit its destination to `api-m.sandbox.paypal.com`. Do not paste it into chat, source files, terminal commands, logs or this repository. Clear the separate ID/secret settings for this mode. The agent has not generated/converted a secret or changed configuration/network permissions. The user completes security prompts and login themselves. Saving a network secret may change allowed-domain policy, so review that setting explicitly.
 
+To prepare the complete value without a conversion website or terminal command, the user can download the self-contained [Korean offline helper](../tools/paypal-oauth-helper.html) and open it locally. It masks both inputs, requires explicit copy, offers a manual fallback only after copy fails and the user requests disclosure, and clears page-held values. The agent tested synthetic strings only; no real secret was read or transformed. [Usage and validation limits](offline-helper.md).
+
 The synthetic fetch test proves the exact string passed by this application, including absence of transformations. It does not certify the HTTP client/proxy's treatment of arbitrary whitespace or actual secret replacement. Use the platform-issued placeholder as supplied and prove the complete Sandbox OAuth path only after configuration-ready confirmation. No raw OAuth request headers should be logged during that proof.
 
 ## Independent sandbox demo host

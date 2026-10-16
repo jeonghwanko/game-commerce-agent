@@ -27,12 +27,17 @@ Default `PAYMENT_PROVIDER=mock` and `AI_PROVIDER=mock` are entirely offline. “
 
 The server listens on loopback only. This is an isolated Sandbox prototype, not a deployed shop. The anonymous, server-issued HttpOnly cookie represents a demo player. The same unexpired cookie restores server state after reload/restart; this is not account login or cross-device recovery. The implemented `AuthenticatedPrincipalAdapter` instead consumes a host-verified stable principal on every request and restores rights across host re-logins. It does not verify tokens itself or connect to a private authentication DB. Production startup rejects anonymous mode. See [the contracts](docs/contracts.md).
 
+## Offline Sandbox setup helper
+
+Download [paypal-oauth-helper.html](tools/paypal-oauth-helper.html) and open the saved file locally. This single Korean HTML file lets the user paste their Sandbox Client ID and Secret into masked fields, generate the full Basic Authorization value, explicitly copy it, and clear the page. It needs no server, external resources or provider calls. The agent never handles real credentials. See [usage, validation policy and test limits](docs/offline-helper.md).
+
 ## Verification
 
 ```sh
 npm run check          # Syntax checks and unit/HTTP/adapter tests; no external API calls
 npm run format:check
 npm run test:browser   # Installed Chromium required; actual UI interactions, offline mock
+npm run test:helper    # Offline OAuth helper: fake inputs, keyboard/mobile/CSP checks
 node scripts/evaluate-ai.js # Zero-network cost/evaluation preflight; --live requires prepared configuration
 npm run funnel        # Local operator aggregate; no raw dialogues or payment data
 ```

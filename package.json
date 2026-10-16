@@ -13,7 +13,8 @@
     "funnel": "node --env-file-if-exists=.env scripts/funnel.js",
     "test:browser": "node scripts/browser-smoke.js",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:helper": "node scripts/offline-helper-browser.js"
   },
   "license": "MIT",
   "devDependencies": {
