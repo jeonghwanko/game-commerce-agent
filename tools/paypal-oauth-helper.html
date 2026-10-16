@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'sha256-E/iIawI+k9Zt4ZmHWJaITGtuOKA5GM13VhU4JpCoiAY='; style-src 'sha256-efzFsAXZbzyjly+3kpYTr4g0Zlk4Z9NS160kfNGCacU='; connect-src 'none'; img-src 'none'; font-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>PayPal Sandbox 인증값 · 오프라인 도우미</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+        color: #172b40;
+        background: #eef3f8;
+        line-height: 1.65;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 1rem;
+      }
+      main {
+        max-width: 42rem;
+        margin: 1rem auto;
+        padding: clamp(1rem, 4vw, 2rem);
+        background: white;
+        border: 1px solid #a7b7c8;
+        border-radius: 1rem;
+        overflow-wrap: anywhere;
+      }
+      h1 {
+        font-size: 1.65rem;
+        line-height: 1.35;
+      }
+      h2 {
+        font-size: 1.1rem;
+      }
+      label {
+        display: block;
+        font-weight: 700;
+        margin-top: 1rem;
+      }
+      input,
+      textarea,
+      button {
+        font: inherit;
+      }
+      input,
+      textarea {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        padding: 0.65rem;
+        border: 1px solid #53687d;
+        border-radius: 0.35rem;
+      }
+      textarea {
+        resize: vertical;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+      }
+      button {
+        padding: 0.65rem 1rem;
+        min-height: 44px;
+        border: 1px solid #254762;
+        border-radius: 0.35rem;
+        color: white;
+        background: #174f78;
+        cursor: pointer;
+      }
+      button.secondary {
+        color: #172b40;
+        background: #edf2f7;
+      }
+      button:disabled {
+        color: #475767;
+        background: #e3e8ed;
+        border-color: #9aabba;
+        cursor: default;
+      }
+      :focus-visible {
+        outline: 3px solid #8b4200;
+        outline-offset: 3px;
+      }
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        margin: 1rem 0;
+      }
+      .note {
+        font-size: 0.9rem;
+      }
+      #status {
+        min-height: 3.3em;
+        font-weight: 700;
+      }
+      #status[data-error="true"] {
+        color: #9b2020;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>로컬 파일 전용 · PayPal Sandbox</p>
+      <h1>두 값을 붙여넣고 인증값을 복사하세요</h1>
+      <p>
+        이 HTML 파일을 내려받아 브라우저에서 직접 여세요. 인터넷 연결 없이
+        사용할 수 있습니다. 외부 변환 사이트나 명령어는 필요하지 않습니다.
+      </p>
+      <ol>
+        <li>
+          본인의 PayPal <strong>Sandbox 앱</strong>에서 Client ID와 Client
+          Secret을 각각 복사해 아래에 붙여넣으세요.
+        </li>
+        <li>
+          ‘인증값 만들기’를 누른 다음 ‘인증값 복사’를 누르세요. 자동으로
+          복사하지 않습니다.
+        </li>
+        <li>
+          환경의 보안 입력 화면에서
+          <code>PAYPAL_OAUTH_BASIC_AUTH_HEADER</code> Network secret 값으로 직접
+          붙여넣으세요. 복사된 값에 Basic을 더하거나 다시 인코딩하지 마세요. 이
+          모드에서는 <code>PAYPAL_CLIENT_ID</code>와
+          <code>PAYPAL_CLIENT_SECRET</code>을 함께 설정하지 마세요.
+        </li>
+        <li>
+          완료 후 ‘모두 지우기’를 누르고 이 탭을 닫으세요. 대화·로그·공개
+          저장소에는 붙여넣지 마세요.
+        </li>
+      </ol>
+      <p id="policy" class="note">
+        입력 정책: 각 값은 1~4096자의 ASCII 표시 문자만 허용합니다.
+        공백(앞뒤·중간 포함), 탭, 줄바꿈, 제어문자, 한글 등 비 ASCII 문자는
+        거부하며 자동 제거·변환하지 않습니다. Client ID에는 콜론(:)을 쓸 수
+        없습니다. Secret의 콜론은 그대로 포함합니다. 잘못된 붙여넣기는 해당 칸을
+        비우고 오류를 알립니다.
+      </p>
+      <form id="credentials" autocomplete="off" novalidate>
+        <label for="client-id">Client ID</label>
+        <input
+          id="client-id"
+          type="password"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-describedby="policy"
+          required
+        />
+        <label for="client-secret">Client Secret</label>
+        <input
+          id="client-secret"
+          type="password"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-describedby="policy"
+          required
+        />
+        <div class="buttons">
+          <button id="generate" type="submit">인증값 만들기</button>
+          <button id="clear" class="secondary" type="button">
+            모두 지우기
+          </button>
+        </div>
+      </form>
+      <p id="status" role="status" aria-live="polite" aria-atomic="true">
+        입력값과 결과는 이 페이지의 메모리에서만 다룹니다.
+      </p>
+      <div class="buttons">
+        <button id="copy" type="button" disabled>인증값 복사</button>
+        <button id="manual" class="secondary" type="button" hidden>
+          수동 복사용 값 표시
+        </button>
+      </div>
+      <section id="fallback" hidden aria-labelledby="manual-title">
+        <h2 id="manual-title">직접 선택해 복사하세요</h2>
+        <p class="note">
+          이 영역에는 비밀 인증값이 보입니다. Ctrl+C / ⌘C 또는 모바일의 복사
+          메뉴를 사용하세요. 복사 후 값을 숨기거나 모두 지워 주세요.
+        </p>
+        <label for="result">전체 Authorization 값 (수동 복사용)</label>
+        <textarea
+          id="result"
+          rows="4"
+          readonly
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        ></textarea>
+        <div class="buttons">
+          <button id="hide" class="secondary" type="button">값 숨기기</button>
+        </div>
+      </section>
+      <p class="note">
+        결과는 <code>Basic + Base64(Client ID:Client Secret)</code> 형식입니다.
+        Base64는 암호화가 아니며 결과도 비밀값입니다. 이 파일은 인증값의
+        유효성을 PayPal에 확인하지 않고, 환경 설정도 변경하지 않습니다. Cloud
+        Network proxy 실제 연동은 별도 검증이 필요합니다.
+      </p>
+      <p class="note">
+        페이지는 네트워크 요청이나 저장소·쿠키·분석 도구를 사용하지 않습니다.
+        지우기는 폼과 페이지가 보유한 변수를 비웁니다. 메모리의 물리적 완전
+        삭제를 보장하지 않으며, 이미 복사한 값은 시스템 클립보드에 남을 수
+        있습니다. 브라우저의 비밀번호 저장 제안은 거절하세요.
+      </p>
+      <noscript
+        >JavaScript가 꺼져 있어 변환할 수 없습니다. 이 파일의 로컬 스크립트를
+        허용한 브라우저에서 다시 여세요.</noscript
+      >
+    </main>
+    <script>
+      (() => {
+        "use strict";
+        const byId = (id) => document.getElementById(id);
+        const form = byId("credentials");
+        const clientId = byId("client-id");
+        const secret = byId("client-secret");
+        const copy = byId("copy");
+        const manual = byId("manual");
+        const fallback = byId("fallback");
+        const result = byId("result");
+        const status = byId("status");
+        let authorization = "";
+        let generation = 0;
+        let copying = false;
+        const say = (message, error = false) => {
+          status.textContent = message;
+          status.dataset.error = String(error);
+        };
+        const hide = () => {
+          result.value = "";
+          fallback.hidden = true;
+        };
+        const invalidate = () => {
+          generation += 1;
+          authorization = "";
+          copying = false;
+          copy.disabled = true;
+          manual.hidden = true;
+          hide();
+        };
+        const invalid = (value, isId) => {
+          if (!value.length) return "값을 입력해 주세요.";
+          if (value.length > 4096)
+            return "4096자를 초과했습니다. 값을 확인해 주세요.";
+          if (/[^\x21-\x7e]/.test(value))
+            return "공백·줄바꿈·제어문자 또는 비 ASCII 문자는 허용하지 않습니다. 원본을 확인해 주세요.";
+          if (isId && value.includes(":"))
+            return "Client ID에는 콜론(:)을 사용할 수 없습니다.";
+          return "";
+        };
+        const reject = (field, message) => {
+          field.setAttribute("aria-invalid", "true");
+          say(
+            `${field === clientId ? "Client ID" : "Client Secret"}: ${message}`,
+            true,
+          );
+          field.focus();
+        };
+        for (const field of [clientId, secret]) {
+          field.addEventListener("input", () => {
+            invalidate();
+            field.removeAttribute("aria-invalid");
+            say("입력이 바뀌었습니다. 인증값을 다시 만들어 주세요.");
+          });
+          // Password inputs strip CR/LF themselves: inspect the original paste first.
+          field.addEventListener("paste", (event) => {
+            const pasted = event.clipboardData?.getData("text/plain");
+            const error =
+              pasted === undefined
+                ? "붙여넣기를 읽을 수 없습니다. 직접 입력해 주세요."
+                : invalid(pasted, field === clientId);
+            if (error) {
+              event.preventDefault();
+              invalidate();
+              field.value = "";
+              reject(field, `${error} 이 칸은 비웠습니다.`);
+            }
+          });
+          field.addEventListener("beforeinput", (event) => {
+            if (
+              event.data !== null &&
+              event.data !== undefined &&
+              event.data !== "" &&
+              invalid(event.data, field === clientId)
+            ) {
+              event.preventDefault();
+              invalidate();
+              reject(
+                field,
+                "허용하지 않는 입력을 차단했습니다. 입력 정책을 확인해 주세요.",
+              );
+            }
+          });
+        }
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          invalidate();
+          for (const field of [clientId, secret]) {
+            field.removeAttribute("aria-invalid");
+            const error = invalid(field.value, field === clientId);
+            if (error) {
+              reject(field, error);
+              return;
+            }
+          }
+          authorization = "Basic " + btoa(clientId.value + ":" + secret.value);
+          copy.disabled = false;
+          say(
+            "인증값을 만들었습니다. 값은 숨겨져 있으며 아직 복사하지 않았습니다.",
+          );
+          copy.focus();
+        });
+        copy.addEventListener("click", async () => {
+          if (!authorization || copying) return;
+          const attempt = generation;
+          copying = true;
+          copy.disabled = true;
+          manual.hidden = true;
+          hide();
+          say("복사 요청 중입니다. 브라우저의 권한 응답을 기다려 주세요.");
+          try {
+            if (!navigator.clipboard?.writeText) throw new Error("unavailable");
+            await navigator.clipboard.writeText(authorization);
+            if (attempt === generation)
+              say(
+                "인증값을 복사했습니다. 보안 입력 화면에 직접 붙여넣은 후 모두 지워 주세요.",
+              );
+          } catch {
+            if (attempt === generation) {
+              say(
+                "자동 복사를 사용할 수 없습니다. 원하면 ‘수동 복사용 값 표시’를 눌러 직접 복사하세요.",
+                true,
+              );
+              manual.hidden = false;
+            }
+          } finally {
+            if (attempt === generation) {
+              copying = false;
+              copy.disabled = !authorization;
+            }
+          }
+        });
+        manual.addEventListener("click", () => {
+          if (!authorization || manual.hidden) return;
+          fallback.hidden = false;
+          result.value = authorization;
+          result.focus();
+          result.select();
+          say(
+            "수동 복사용 값이 표시되었습니다. 복사 후 값을 숨기거나 모두 지워 주세요.",
+          );
+        });
+        byId("hide").addEventListener("click", () => {
+          hide();
+          manual.focus();
+          say("수동 복사용 값을 숨겼습니다.");
+        });
+        const clear = () => {
+          invalidate();
+          form.reset();
+          clientId.value = "";
+          secret.value = "";
+          clientId.removeAttribute("aria-invalid");
+          secret.removeAttribute("aria-invalid");
+          say(
+            "입력과 페이지의 결과를 지웠습니다. 이미 복사한 시스템 클립보드는 비우지 않습니다.",
+          );
+        };
+        byId("clear").addEventListener("click", () => {
+          clear();
+          clientId.focus();
+        });
+        window.addEventListener("pagehide", clear);
+        // Do not restore credentials from the back/forward cache.
+        window.addEventListener("pageshow", clear);
+      })();
+    </script>
+  </body>
+</html>
