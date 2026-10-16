@@ -25,6 +25,8 @@ Default `PAYMENT_PROVIDER=mock` and `AI_PROVIDER=mock` are entirely offline. “
 5. Talk to the courier for the seal and the archivist for the rumor. The gatekeeper requires formal clothes **and** both free quests.
 6. Walk through the open gate. A new player can finish by borrowing the plain formal outfit without creating any order. The optional evidence panel is collapsed during play.
 
+The gathering comparison shows additional cost, owned/free/optional status, budget fit and remaining free quests. Preview Gala, Traveler or the free loan to see conditional Rosalyn/Gatekeeper reactions without creating an order or changing a quest. Plans offer NPC directions; the server-loaded progress panel makes same-session recovery visible. See the [English submission draft](docs/submission-draft.md) and [2:45 rehearsal script](docs/demo-script.md).
+
 The server listens on loopback only. This is an isolated Sandbox prototype, not a deployed shop. The anonymous, server-issued HttpOnly cookie represents a demo player. The same unexpired cookie restores server state after reload/restart; this is not account login or cross-device recovery. The implemented `AuthenticatedPrincipalAdapter` instead consumes a host-verified stable principal on every request and restores rights across host re-logins. It does not verify tokens itself or connect to a private authentication DB. Production startup rejects anonymous mode. See [the contracts](docs/contracts.md).
 
 ## Offline Sandbox setup helper

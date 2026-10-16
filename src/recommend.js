@@ -7,6 +7,7 @@ import {
   INTENT_SYSTEM_PROMPT,
 } from "./intent.js";
 import { planGoal } from "./planner.js";
+import { storyComparison } from "./story-preview.js";
 export class Recommender {
   constructor({
     mode = "mock",
@@ -151,6 +152,7 @@ export class Recommender {
       mode: this.mode,
       interpretation: intent,
       products: available,
+      comparison: storyComparison(plan, context, catalog, budgetMinor),
       plan: {
         goal: plan.goal,
         projected: plan.projected,

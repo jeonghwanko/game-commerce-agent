@@ -227,6 +227,25 @@ try {
       sessionId,
     );
     await screenshot(name);
+    if (name === "mock-preview") {
+      for (const [id, file] of [
+        ["comparison", "comparison-panel"],
+        ["purchase-panel", "npc-preview-panel"],
+      ]) {
+        const clip = await evaluate(
+          `(() => { const r=document.getElementById('${id}').getBoundingClientRect(); return {x:r.x+scrollX,y:r.y+scrollY,width:r.width,height:r.height,scale:1}; })()`,
+        );
+        const shot = await call(
+          "Page.captureScreenshot",
+          { format: "png", captureBeyondViewport: true, clip },
+          sessionId,
+        );
+        await writeFile(
+          `/tmp/gca-${file}.png`,
+          Buffer.from(shot.data, "base64"),
+        );
+      }
+    }
     await call(
       "Emulation.setDeviceMetricsOverride",
       { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
@@ -250,11 +269,75 @@ try {
   await typeGoal("enter the evening gathering", "3.00");
   await click("Recommend outfits");
   await wait("document.querySelectorAll('.product').length===1");
+  assert.match(
+    await evaluate("document.querySelector('.plan-context').textContent"),
+    /Budget: USD 3.00.*Owned collection: none/,
+  );
+  await click("Visit the courier · Free");
+  await wait("scene.near === 'seal'");
+  assert.equal(await evaluate("document.activeElement.id"), "world");
+  assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
+  await click("Walk to shop");
+  await wait("scene.near === 'shop'");
+  await click("Talk to Rosalyn");
+  const previewState = JSON.stringify(store.all("SELECT * FROM game"));
+  await click("Compare Rosalyn Gala Outfit");
+  await wait(
+    "document.querySelector('#look-reactions').textContent.includes('gold star embroidery')",
+  );
+  assert.match(
+    await evaluate("document.querySelector('#look-reactions').textContent"),
+    /Gatekeeper:.*free invitation seal.*free password quest/,
+  );
+  await click("Preview Traveler’s Cloak only");
+  await wait("previewSku === 'rosalyn-traveler'");
+  assert.match(
+    await evaluate("document.querySelector('#look-reactions').textContent"),
+    /Rosalyn:.*teal cloak/,
+  );
+  assert.match(
+    await evaluate("document.querySelector('#look-reactions').textContent"),
+    /Gatekeeper:.*formal clothes.*free invitation seal.*free password quest/,
+  );
+  assert.equal(
+    await evaluate("document.querySelector('#checkout').children.length"),
+    0,
+  );
+  await click("Preview Plain formal loan only");
+  await wait("previewSku === 'borrowed'");
+  assert.match(
+    await evaluate("document.querySelector('#look-reactions').textContent"),
+    /same dress check as Gala, for free/,
+  );
+  assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
+  assert.equal(store.get("SELECT count(*) n FROM quotes").n, 0);
+  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
+  assert.equal(
+    JSON.stringify(store.all("SELECT * FROM game")),
+    previewState,
+    "three previews cannot change quests or equipment",
+  );
   await click("Review purchase");
   await wait(
     "document.querySelector('#quote').textContent.includes('I confirm USD 1.99')",
   );
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 0);
+  assert.match(
+    await evaluate("document.querySelector('#preview-caption').textContent"),
+    /Rosalyn Gala Outfit/,
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('#preview').toDataURL() !== document.querySelector('#loan-preview').toDataURL()",
+    ),
+    true,
+    "paid and free previews are visibly different",
+  );
+  assert.equal(
+    await evaluate("scene.state.equipped"),
+    null,
+    "preview cannot equip or grant",
+  );
   await reflow("quote");
   await desktopShot("mock-preview");
   await click("I confirm");
@@ -279,6 +362,18 @@ try {
   assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 0);
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 1);
   await reflow("approval-pending");
+  await click("Preview Traveler’s Cloak only");
+  await wait("previewSku === 'rosalyn-traveler'");
+  assert.equal(
+    await evaluate("document.querySelector('#checkout').children.length"),
+    0,
+  );
+  await click("Return to pending purchase");
+  await wait("previewSku === 'rosalyn-gala'");
+  assert.match(
+    await evaluate("document.querySelector('#quote').textContent"),
+    /Rosalyn Gala Outfit.*USD 1.99/,
+  );
   await click("Walk to shop");
   await wait("scene.near === 'shop'");
   await click("Talk to Rosalyn");
@@ -341,7 +436,15 @@ try {
   await wait(
     "document.querySelector('#wardrobe').textContent.includes('Rosalyn Gala Outfit')",
   );
-  await click("Wear Rosalyn Gala Outfit");
+  assert.match(
+    await evaluate("document.querySelector('#quote').textContent"),
+    /Rosalyn Gala Outfit.*USD 1.99/,
+  );
+  assert.match(
+    await evaluate("document.querySelector('#status').textContent"),
+    /Mock purchase completed.*no PayPal payment/,
+  );
+  await click("Wear purchased Rosalyn Gala Outfit");
   await wait(
     "document.querySelector('#requirements').textContent.includes('Formal outfit ✓')",
   );
@@ -377,9 +480,64 @@ try {
   await wait(
     "document.querySelector('#guard')?.textContent.includes('Welcome inside')",
   );
+  assert.match(
+    await evaluate("document.querySelector('#restore-summary').textContent"),
+    /Owned collection: Rosalyn Gala Outfit/,
+  );
+  assert.match(
+    await evaluate("document.querySelector('#progress-summary').textContent"),
+    /3 of 3 complete/,
+  );
+  await call("Page.reload", {}, sessionId);
+  await wait(
+    "document.querySelector('#progress-summary')?.textContent.includes('3 of 3 complete')",
+  );
+  assert.equal(store.get("SELECT count(*) n FROM orders").n, 1);
+  assert.equal(store.get("SELECT count(*) n FROM entitlements").n, 1);
   await click("Walk to shop");
   await wait("scene.near === 'shop'");
   await click("Talk to Rosalyn");
+  await typeGoal("enter the evening gathering for free", "0.00");
+  await click("Recommend outfits");
+  await wait(
+    "document.querySelector('.plan-context')?.textContent.includes('Budget: USD 0.00')",
+  );
+  assert.equal(
+    await evaluate("document.querySelectorAll('.product').length"),
+    0,
+  );
+  assert.match(
+    await evaluate("document.querySelector('#plan').textContent"),
+    /Owned collection: Rosalyn Gala Outfit/,
+  );
+  assert.match(
+    await evaluate("document.querySelector('#comparison').textContent"),
+    /Already owned.*Additional cost: USD 0.00/,
+  );
+  assert.match(
+    await evaluate("document.querySelector('#comparison').textContent"),
+    /Traveler.*USD 0.99.*above budget/,
+  );
+  await click("Compare Traveler’s Cloak");
+  await wait("previewSku === 'rosalyn-traveler'");
+  assert.match(
+    await evaluate("document.querySelector('#look-reactions').textContent"),
+    /Gatekeeper:.*formal clothes/,
+  );
+  assert.ok(
+    !(
+      await evaluate(
+        "document.querySelector('#look-reactions').textContent.split('Gatekeeper:')[1]",
+      )
+    ).includes("still need the free invitation seal"),
+  );
+  assert.equal(
+    await evaluate(
+      "scene.state.formal && scene.state.seal && scene.state.rumor",
+    ),
+    true,
+    "previewing cloak leaves actual Gala and quest checks intact",
+  );
   const screenResult = await call(
     "Page.captureScreenshot",
     { format: "png", captureBeyondViewport: true },
@@ -493,6 +651,20 @@ try {
   await reflow("keyboard-open-shop");
   await tabActivate("Recommend outfits");
   await wait("document.querySelectorAll('.product').length===1");
+  await tabActivate("Compare Traveler’s Cloak");
+  await wait("previewSku === 'rosalyn-traveler'");
+  await reflow("keyboard-cloak-reactions");
+  assert.match(
+    await evaluate("document.querySelector('#look-reactions').textContent"),
+    /Rosalyn:.*teal cloak/,
+  );
+  await tabActivate("Preview Plain formal loan only");
+  await wait("previewSku === 'borrowed'");
+  await reflow("keyboard-loan-reactions");
+  assert.match(
+    await evaluate("document.querySelector('#look-reactions').textContent"),
+    /same dress check as Gala, for free/,
+  );
   await tabActivate("Borrow formal clothes");
   await wait(
     "document.querySelector('#wardrobe').textContent.includes('Free loan')",
@@ -506,11 +678,15 @@ try {
     await evaluate("document.querySelectorAll('.product').length"),
     0,
   );
-  await tabActivate("Walk to courier");
+  assert.match(
+    await evaluate("document.querySelector('#progress-summary').textContent"),
+    /Owned collection: none.*available, not owned/,
+  );
+  await tabActivate("Next: visit the courier");
   await wait("scene.near === 'seal'");
   await tabActivate("Talk to Courier");
   await tabActivate("Accept the seal");
-  await tabActivate("Walk to archivist");
+  await tabActivate("Next: visit the archivist");
   await wait("scene.near === 'rumor'");
   await tabActivate("Talk to Archivist");
   await tabActivate("Remember the rumor");
@@ -520,6 +696,24 @@ try {
   await tabActivate("Enter the gathering");
   await wait("scene.arrived === true");
   assert.equal(store.get("SELECT count(*) n FROM orders").n, 2);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await call("Page.reload", {}, sessionId);
+    await wait(
+      "document.querySelector('#progress-summary')?.textContent.includes('3 of 3 complete')",
+    );
+    assert.match(
+      await evaluate("document.querySelector('#restore-summary').textContent"),
+      /Owned collection: none.*available, not owned/,
+    );
+    await evaluate("document.documentElement.style.zoom='2'");
+    await reflow("free-restored");
+    await tabActivate("Your story path is ready");
+    await wait("scene.near === 'guard'");
+    await tabActivate("Talk to Gatekeeper");
+    await tabActivate("Enter the gathering");
+    await wait("scene.arrived === true");
+    assert.equal(store.get("SELECT count(*) n FROM orders").n, 2);
+  }
   // Synthetic authenticated independent host: UI obtains server dialogue challenges.
   // No real AI, provider, deployment, or private identity system is involved.
   const demoStore = new Store();
@@ -583,7 +777,7 @@ try {
     demoStore.close();
   }
   console.log(
-    "PASS Chromium pointer purchase/quote isolation/recovery; mobile 390px and CSS 200% reflow; Tab/Enter free completion; global session error/retry; reduced motion; authenticated independent demo free route. Mock rehearsal only.",
+    "PASS Chromium goal/cost comparison; Gala/cloak/loan previews with two NPC reactions and no ledger mutations; pointer purchase/quote isolation/recovery; mobile 390px and CSS 200% reflow; Tab/Enter free completion and repeated restore; global session error/retry; reduced motion; authenticated independent demo free route. Mock rehearsal only.",
   );
 } finally {
   socket?.close();

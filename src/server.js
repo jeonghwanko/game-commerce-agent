@@ -11,6 +11,7 @@ import { PayPalSandboxProvider } from "./providers/paypal.js";
 import { Recommender } from "./recommend.js";
 import { GameBridge } from "./game.js";
 import { ExternalWorkBudget } from "./budget.js";
+import { lookPreviews } from "./story-preview.js";
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 async function body(req) {
   const chunks = [];
@@ -237,8 +238,10 @@ export function createApp({
       }
       if (req.method === "GET" && path === "/api/commerce/catalog")
         return send(200, catalog);
-      if (req.method === "GET" && path === "/api/game")
-        return send(200, game.state(user));
+      if (req.method === "GET" && path === "/api/game") {
+        const state = game.state(user);
+        return send(200, { ...state, previews: lookPreviews(state, catalog) });
+      }
       if (req.method === "GET" && path === "/api/commerce/entitlements")
         return send(200, game.state(user).entitlements);
       if (req.method === "GET" && path === "/api/commerce/orders")

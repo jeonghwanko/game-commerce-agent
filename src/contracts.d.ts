@@ -100,3 +100,25 @@ export interface GoalPlan {
     quest?: "seal" | "rumor";
   }>;
 }
+
+/** Conditional display data; never usable as an ownership or quest grant. */
+export interface LookPreview {
+  sku: string;
+  name: string;
+  access: "owned" | "free_loan" | "optional_purchase" | "held";
+  additionalCost: { amount: number; currency: string } | null;
+  dressCheck: boolean;
+  afterWearing: GoalPlan["projected"];
+  remaining: string[];
+  condition: string;
+  rosalyn: string;
+  guard: string;
+}
+export interface StoryComparison {
+  budget: { amount: number; currency: "USD" };
+  afterPlan: GoalPlan["projected"];
+  freeQuestActions: GoalPlan["actions"];
+  options: Array<
+    LookPreview & { withinBudget: boolean; suggestedPurchase: boolean }
+  >;
+}

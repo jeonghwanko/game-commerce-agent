@@ -321,3 +321,49 @@ button,
 a.action {
   max-width: 100%;
 }
+.journey {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid #5e7463;
+  border-radius: 12px;
+}
+.journey h2 {
+  margin-bottom: 8px;
+}
+.look-comparison {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 16px;
+}
+.look-comparison figure {
+  margin: 0;
+  min-width: 0;
+}
+.look-comparison canvas {
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+.look-comparison figcaption {
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.plan-context {
+  color: var(--accent);
+}
+.comparison-option {
+  border: 1px solid #5e7463;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+}
+.comparison-option h4 {
+  margin: 0;
+}
+#look-reactions {
+  border-left: 3px solid var(--accent);
+  padding-left: 14px;
+}
+#purchase-panel {
+  align-self: start;
+}

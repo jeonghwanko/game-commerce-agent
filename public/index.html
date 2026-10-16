@@ -51,6 +51,14 @@
           </p>
           <div id="dialogue-actions"></div>
         </div>
+        <section class="journey" aria-labelledby="journey-title">
+          <h2 id="journey-title">Your free story path</h2>
+          <p id="progress-summary" role="status">
+            Loading your saved wardrobe and quests…
+          </p>
+          <div id="next-step"></div>
+          <p id="restore-summary" class="controls"></p>
+        </section>
       </section>
       <section class="panel" id="shop-panel" hidden>
         <h2>Ask Rosalyn</h2>
@@ -72,6 +80,11 @@ I need formal clothes to get past the guard.</textarea
           /><button>Recommend outfits</button>
         </form>
         <div id="plan"></div>
+        <section
+          id="comparison"
+          hidden
+          aria-label="Compare paths to the gathering"
+        ></section>
         <div id="products"></div>
         <p id="alternative">
           Free route: borrow formal clothes, find a seal, and learn the rumor.
@@ -79,12 +92,40 @@ I need formal clothes to get past the guard.</textarea
       </section>
       <section class="panel" id="purchase-panel" hidden>
         <h2>Your fitting room</h2>
-        <canvas
-          id="preview"
-          width="240"
-          height="140"
-          aria-label="Outfit preview"
-        ></canvas>
+        <div
+          id="preview-options"
+          aria-label="Preview looks without purchasing"
+        ></div>
+        <div class="look-comparison">
+          <figure>
+            <canvas
+              id="preview"
+              width="240"
+              height="140"
+              aria-label="Selected outfit preview"
+            ></canvas>
+            <figcaption id="preview-caption">Selected collectible</figcaption>
+          </figure>
+          <figure>
+            <canvas
+              id="loan-preview"
+              width="240"
+              height="140"
+              aria-label="Plain formal clothes, free loan preview"
+            ></canvas>
+            <figcaption>
+              Plain formal loan · Free<br />Meets the same dress check as Gala.
+            </figcaption>
+          </figure>
+        </div>
+        <p class="controls">
+          Preview only. Your character changes only when you choose to wear an
+          available outfit. Neither look replaces the seal or password quests.
+        </p>
+        <section
+          id="look-reactions"
+          aria-label="Conditional NPC reactions"
+        ></section>
         <div id="quote" tabindex="-1">
           Select an outfit to see its exact price and contents.
         </div>
