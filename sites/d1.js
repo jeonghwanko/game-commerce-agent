@@ -1,4 +1,5 @@
 import { requireThat } from "../src/catalog.js";
+import { EVENT_NAMES, eventLimit, eventIds } from "../src/events.js";
 export const uuid = () => crypto.randomUUID();
 export class D1Ledger {
   constructor(db) {
@@ -42,6 +43,7 @@ export class D1Ledger {
     );
   }
   event(user, name, order = null, id = uuid()) {
+    requireThat(EVENT_NAMES.has(name), "invalid_event");
     return this.run(
       "INSERT OR IGNORE INTO sites_events VALUES(?,?,?,?,?,0)",
       id,
@@ -50,6 +52,30 @@ export class D1Ledger {
       name,
       Date.now(),
     );
+  }
+  async observe(...args) {
+    try {
+      await this.event(...args);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  outbox(limit = 100) {
+    return this.all(
+      "SELECT id,user_id,order_id,name,at FROM sites_events WHERE delivered=0 ORDER BY at,id LIMIT ?",
+      eventLimit(limit),
+    );
+  }
+  async acknowledge(ids) {
+    eventIds(ids);
+    if (ids.length)
+      await this.batch(
+        ids.map((id) => [
+          "UPDATE sites_events SET delivered=1 WHERE id=? AND delivered=0",
+          id,
+        ]),
+      );
   }
 }
 // Durable cross-isolate window + concurrency, including OAuth/signature response parsing.

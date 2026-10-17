@@ -140,6 +140,7 @@ test("outbox crash after sink acceptance, restart and concurrent delivery dedupl
         crash = false;
         throw new Error("sink accepted, response lost");
       }
+      return { id: e.id, status: "duplicate" };
     },
   };
   await assert.rejects(deliverOutbox(s, sink));

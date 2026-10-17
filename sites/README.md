@@ -77,6 +77,8 @@ A provider+merchant marker binds purchase data to its environment. Never switch 
 
 ## Offline checks and remaining evidence
 
+The PR3-based [recovery work](../docs/game-bridge-recovery.md) adds `0003_equip_requests.sql`, the public browser client, and operator-only `deliverSitesOutbox`. No hosted migration or deployment accompanies this change; the existing private Site v2 is preserved. Source export includes the additive migration, client asset and outbox modules. Existing migration files and MIT notices remain unchanged.
+
 `node --test test/sites-d1.test.js` exercises actual SQLite SQL through an asynchronous D1 contract fixture, atomic rollback, competing requests, restart/reopen, refunds, signature failures, and the actual Sandbox adapter against fake HTTP responses. Existing `npm run check` retains Node-server payment/security regressions. Chromium adds the same original UI against the Worker/D1 fixture with synthetic identity: unconfigured purchase preview, zero quotes/orders/rights, 390px/200% layout, Tab/Enter free story and restart. These are not hosted D1/Cloudflare, real ChatGPT authentication, real signatures or Sandbox payment evidence.
 
 The user's reported local OAuth HTTP 200 is the only real authentication evidence supplied. It does not establish this Site's credential injection, merchant/app match, approval, capture, webhook delivery or entitlement grant. Actual Sites deployment, migration behavior, owner identity binding/header stripping, public callback delivery, real Sandbox E2E and real AI remain unverified. No existing service was changed, PR merged, cost authorized or public deployment performed.

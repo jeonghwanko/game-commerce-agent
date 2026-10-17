@@ -50,7 +50,7 @@ export interface EntitlementView {
 export interface GameCommerceBridge {
   /** Identity comes from host-authenticated session, never URL/body userId. */
   entitlements(): Promise<EntitlementView[]>;
-  equip(sku: string): Promise<unknown>;
+  equip(sku: string, requestId?: string): Promise<unknown>;
   /** Host game retains authority over independent seal/rumor quest progression. */
 }
 export interface CommerceEvent {
@@ -61,7 +61,25 @@ export interface CommerceEvent {
   at: number;
 }
 export interface EventSink {
-  accept(event: CommerceEvent): Promise<void>;
+  /** Resolve only after durable, atomic event-ID deduplication and effect commit. */
+  accept(event: Readonly<CommerceEvent>): Promise<{
+    id: string;
+    status: "accepted" | "duplicate";
+  }>;
+}
+/** Response comparison token only: never an authentication credential. */
+export interface GameSession {
+  scope: string;
+  csrf: string;
+  paymentMode: ProviderName | "unconfigured";
+  aiMode: string;
+  authMode: string;
+  gameHost: string;
+}
+export interface EquipIntent {
+  scope: string;
+  sku: string;
+  requestId: string;
 }
 /** Only a host-owned authentication verifier may construct this value. */
 export interface VerifiedPrincipal {

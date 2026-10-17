@@ -12,7 +12,18 @@ export function sqliteD1(path = ":memory:", migrate = true) {
         "utf8",
       ),
     );
-    sqlite.exec(readFileSync(new URL("../migrations/0002_ai_requests.sql", import.meta.url), "utf8"));
+    sqlite.exec(
+      readFileSync(
+        new URL("../migrations/0002_ai_requests.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    sqlite.exec(
+      readFileSync(
+        new URL("../migrations/0003_equip_requests.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   }
   const fixture = {
     sqlite,

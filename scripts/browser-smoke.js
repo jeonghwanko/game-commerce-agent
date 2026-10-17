@@ -41,7 +41,41 @@ const { server, commerce } = createApp({ store, origin, provider });
 const handler = server.listeners("request")[0];
 server.removeAllListeners("request");
 let failInitialSession = true;
+let analyticsMode = "hang";
+const heldAnalytics = new Set();
+const releaseAnalytics = () => {
+  for (const res of heldAnalytics) {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "synthetic_analytics_outage" }));
+  }
+  heldAnalytics.clear();
+};
+const recordEvent = store.event.bind(store);
+store.event = (user, name, ...args) => {
+  if (
+    [
+      "shop_opened",
+      "agent_query_submitted",
+      "product_recommended",
+      "free_quest_completed",
+      "item_equipped",
+      "npc_reaction_triggered",
+    ].includes(name)
+  )
+    throw Error("synthetic_optional_analytics_write_failure");
+  return recordEvent(user, name, ...args);
+};
 server.on("request", (req, res) => {
+  if (req.url === "/api/analytics/funnel") {
+    if (analyticsMode === "hang") {
+      heldAnalytics.add(res);
+      res.on("close", () => heldAnalytics.delete(res));
+    } else {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "synthetic_analytics_outage" }));
+    }
+    return;
+  }
   if (req.url === "/api/session" && failInitialSession) {
     failInitialSession = false;
     res.writeHead(503, { "Content-Type": "application/json" });
@@ -98,7 +132,20 @@ try {
   const call = (method, params = {}, sessionId) =>
     new Promise((resolve, reject) => {
       const id = ++seq;
-      pending.set(id, { resolve, reject });
+      const timeout = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`CDP timeout: ${method}`));
+      }, 20000);
+      pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timeout);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
       socket.send(
         JSON.stringify({
           id,
@@ -352,8 +399,29 @@ try {
   await call("Page.navigate", { url: origin }, sessionId);
   await wait("!document.getElementById('global-error').hidden");
   await act("Restore saved progress");
+  assert.equal(
+    await evaluate("document.querySelector('#global-error').hidden"),
+    true,
+    await evaluate("document.querySelector('#error-code').textContent"),
+  );
   await viewport(1280);
   await goal("무도회에 가고 싶어", "3.00");
+  assert.ok(
+    heldAnalytics.size > 0,
+    "UI and choices render while analytics never resolves",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('#global-error').hidden"),
+    true,
+  );
+  analyticsMode = "error";
+  releaseAnalytics();
+  await wait(
+    "document.querySelector('#funnel').textContent.includes('Analytics unavailable')",
+  );
+  console.log(
+    "PASS Node browser: initial UI and two choices survive hanging/503 analytics and optional event-write failures.",
+  );
   assert.match(
     await evaluate("document.getElementById('choices').textContent"),
     /Borrow for free.*Find a look to buy/,
@@ -597,6 +665,9 @@ try {
     assert.equal(demoStore.get("SELECT count(*) n FROM demo_challenges").n, 0);
     assert.equal(await evaluate("scene.state.borrowed"), false);
     await tabButton("Confirm free loan");
+    console.log(
+      "CHECK Sites: free equip response deliberately dropped; restoring.",
+    );
     await completeStory(true);
     assert.equal(demoStore.get("SELECT count(*) n FROM orders").n, 0);
     assert.equal(demoStore.get("SELECT count(*) n FROM entitlements").n, 0);
@@ -611,30 +682,46 @@ try {
   const sitesOrigin = `http://127.0.0.1:${port + 11}`;
   const sitesAssets = Object.fromEntries(
     await Promise.all(
-      ["/", "/app.js", "/scene.js", "/style.css"].map(async (path) => [
-        path,
-        await readFile(
-          new URL(
-            `../public/${path === "/" ? "index.html" : path.slice(1)}`,
-            import.meta.url,
+      ["/", "/app.js", "/scene.js", "/game-client.js", "/style.css"].map(
+        async (path) => [
+          path,
+          await readFile(
+            new URL(
+              `../public/${path === "/" ? "index.html" : path.slice(1)}`,
+              import.meta.url,
+            ),
+            "utf8",
           ),
-          "utf8",
-        ),
-      ]),
+        ],
+      ),
     ),
   );
-  let aiRequests = 0, failAI = false;
+  let aiRequests = 0,
+    failAI = false;
   const sitesFetch = async (url) => {
     // Fake HTTP for the real interpreter path; never forward to any provider.
     assert.equal(url, SITES_AI_POLICY.endpoint);
     aiRequests++;
-    if (failAI) return new Response("synthetic provider failure", { status: 503 });
+    if (failAI)
+      return new Response("synthetic provider failure", { status: 503 });
     return Response.json({
-      model: SITES_AI_POLICY.model, service_tier: "default",
+      model: SITES_AI_POLICY.model,
+      service_tier: "default",
       usage: { prompt_tokens: 100, completion_tokens: 80, total_tokens: 180 },
-      choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
-        goals: ["story"], style: "any", avoidStyles: [], spending: "optional", clarify: false,
-      }) } }],
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content: JSON.stringify({
+              goals: ["story"],
+              style: "any",
+              avoidStyles: [],
+              spending: "optional",
+              clarify: false,
+            }),
+          },
+        },
+      ],
     });
   };
   let sites = createSitesWorker({ assets: sitesAssets, fetcher: sitesFetch });
@@ -643,8 +730,20 @@ try {
     SITES_OWNER_USER_ID: "synthetic-site-owner",
     DB: sitesDB,
   };
+  let sitesAnalyticsMode = "hang",
+    loseEquipResponse = true;
   const sitesServer = http.createServer(async (req, res) => {
     try {
+      if (req.url === "/api/analytics/funnel") {
+        if (sitesAnalyticsMode === "hang") {
+          heldAnalytics.add(res);
+          res.on("close", () => heldAnalytics.delete(res));
+        } else {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "synthetic_analytics_outage" }));
+        }
+        return;
+      }
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const body = Buffer.concat(chunks);
@@ -656,6 +755,14 @@ try {
         }),
         sitesEnv,
       );
+      if (req.url === "/api/game/equip" && response.ok && loseEquipResponse) {
+        loseEquipResponse = false;
+        // Simulate a proxy losing the successful upstream response. An explicit
+        // 502 avoids Chromium's own transparent transport retry hiding the loss.
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "synthetic_equip_response_lost" }));
+        return;
+      }
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(await response.text());
     } catch {
@@ -679,10 +786,12 @@ try {
     );
     await call(
       "Network.setExtraHTTPHeaders",
-      { headers: {
-        "oai-authenticated-user-id": "synthetic-site-owner",
-        "oai-authenticated-user-email": "owner@example.invalid",
-      } },
+      {
+        headers: {
+          "oai-authenticated-user-id": "synthetic-site-owner",
+          "oai-authenticated-user-email": "owner@example.invalid",
+        },
+      },
       sessionId,
     );
     await call("Page.navigate", { url: sitesOrigin }, sessionId);
@@ -690,6 +799,17 @@ try {
     await viewport(390, 844);
     await evaluate("document.documentElement.style.zoom='2'");
     await tabButton("Show my choices");
+    assert.ok(heldAnalytics.size > 0);
+    assert.equal(
+      await evaluate("document.querySelectorAll('#choices>button').length"),
+      2,
+    );
+    sitesAnalyticsMode = "error";
+    releaseAnalytics();
+    await wait(
+      "document.querySelector('#funnel').textContent.includes('Analytics unavailable')",
+    );
+    await screenshot("sites-analytics-outage-choices");
     await tabButton("Find a look to buy");
     await tabButton("Preview / Review purchase");
     assert.match(
@@ -704,7 +824,40 @@ try {
     await tabTo("#back-preview");
     await tabButton("Borrow for free");
     await tabButton("Confirm free loan");
+    await wait(
+      "!document.querySelector('#global-error').hidden && gameClient.pendingEquip",
+    );
+    const equipRequest = await evaluate("gameClient.pendingEquip.requestId");
+    await act("Restore saved progress");
+    await wait("scene.state.equipped==='borrowed'");
+    assert.equal(
+      await evaluate("gameClient.pendingEquip.requestId"),
+      equipRequest,
+    );
+    await pointer("#wardrobe-details summary");
+    await act("Recover pending outfit change");
+    assert.equal(await evaluate("gameClient.pendingEquip"), null);
+    assert.equal(
+      sitesDB.sqlite
+        .prepare(
+          "SELECT count(*) n FROM sites_events WHERE name='item_equipped'",
+        )
+        .get().n,
+      1,
+    );
+    assert.equal(
+      sitesDB.sqlite
+        .prepare("SELECT count(*) n FROM sites_equip_requests")
+        .get().n,
+      1,
+    );
+    console.log(
+      "CHECK Sites: lost equip response recovered once; completing free story with event-write failure.",
+    );
+    sitesDB.fail = (sql) =>
+      sql.startsWith("INSERT OR IGNORE INTO sites_events VALUES");
     await completeStory(true);
+    sitesDB.fail = null;
     sites = createSitesWorker({
       assets: sitesAssets,
       fetcher: sitesFetch,
@@ -730,44 +883,134 @@ try {
     );
     assert.equal(aiRequests, 0);
     Object.assign(sitesEnv, {
-      AI_MODE: "openai", AI_REQUESTS_ENABLED: "true", AI_MODEL: SITES_AI_POLICY.model,
-      AI_MAX_CALLS: "2", AI_BUDGET_USD: "0.02", OPENAI_API_KEY: "synthetic-browser-key",
+      AI_MODE: "openai",
+      AI_REQUESTS_ENABLED: "true",
+      AI_MODEL: SITES_AI_POLICY.model,
+      AI_MAX_CALLS: "2",
+      AI_BUDGET_USD: "0.02",
+      OPENAI_API_KEY: "synthetic-browser-key",
     });
     await call("Page.reload", {}, sessionId);
     await wait("session?.aiMode==='openai'");
-    await evaluate("openGoal(); document.querySelector('#goal').value='무료로 무도회에 가고 싶어'; document.querySelector('#budget').value='0'; document.querySelector('#recommend').requestSubmit(); document.querySelector('#recommend').requestSubmit();");
+    await evaluate(
+      "openGoal(); document.querySelector('#goal').value='무료로 무도회에 가고 싶어'; document.querySelector('#budget').value='0'; document.querySelector('#recommend').requestSubmit(); document.querySelector('#recommend').requestSubmit();",
+    );
     await wait("lastRecommendation?.ai?.status==='live'");
-    assert.equal(aiRequests, 1, "double submit starts only one synthetic interpretation");
+    assert.equal(
+      aiRequests,
+      1,
+      "double submit starts only one synthetic interpretation",
+    );
     assert.equal(await evaluate("lastRecommendation.dialogue.language"), "ko");
-    assert.match(await evaluate("document.querySelector('#choice-note').textContent"), /무료|복장/);
-    assert.equal(await evaluate("document.querySelector('#choice-step').lang"), "ko");
-    assert.equal(await evaluate("document.querySelectorAll('#choices button').length"), 2);
+    assert.match(
+      await evaluate("document.querySelector('#choice-note').textContent"),
+      /무료|복장/,
+    );
+    assert.equal(
+      await evaluate("document.querySelector('#choice-step').lang"),
+      "ko",
+    );
+    assert.equal(
+      await evaluate("document.querySelectorAll('#choices button').length"),
+      2,
+    );
     assert.equal(await evaluate("lastRecommendation.products.length"), 0);
     await layout();
     failAI = true;
-    await evaluate("openGoal(); document.querySelector('#goal').value='A gala outfit for the gathering'; document.querySelector('#budget').value='3'; document.querySelector('#recommend').requestSubmit();");
+    await evaluate(
+      "openGoal(); document.querySelector('#goal').value='A gala outfit for the gathering'; document.querySelector('#budget').value='3'; document.querySelector('#recommend').requestSubmit();",
+    );
     await wait("lastRecommendation?.mode==='fallback'");
-    assert.match(await evaluate("document.querySelector('#ai-result-status').textContent"), /AI is unavailable/);
+    assert.match(
+      await evaluate("document.querySelector('#ai-result-status').textContent"),
+      /AI is unavailable/,
+    );
     assert.equal(await evaluate("lastRecommendation.products.length"), 0);
     assert.equal(aiRequests, 2);
     failAI = false;
-    await evaluate("openGoal(); document.querySelector('#recommend').requestSubmit();");
+    await evaluate(
+      "openGoal(); document.querySelector('#recommend').requestSubmit();",
+    );
     await wait("lastRecommendation?.ai?.reason==='external_budget_exhausted'");
-    assert.equal(aiRequests, 2, "persistent cap blocks another provider request");
-    assert.equal(sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_quotes").get().n, 0);
-    assert.equal(sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_orders").get().n, 0);
-    assert.equal(sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_entitlements").get().n, 0);
-    console.log("PASS Sites AI dialogue: fake HTTP only; Korean free/zero-budget reply; two choices; double submit; explicit English fallback; durable cost cap; no purchases or paid API traffic.");
+    assert.equal(
+      aiRequests,
+      2,
+      "persistent cap blocks another provider request",
+    );
+    assert.equal(
+      sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_quotes").get().n,
+      0,
+    );
+    assert.equal(
+      sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_orders").get().n,
+      0,
+    );
+    assert.equal(
+      sitesDB.sqlite.prepare("SELECT count(*) n FROM sites_entitlements").get()
+        .n,
+      0,
+    );
+    console.log(
+      "PASS Sites AI dialogue: fake HTTP only; Korean free/zero-budget reply; two choices; double submit; explicit English fallback; durable cost cap; no purchases or paid API traffic.",
+    );
+    sitesEnv.AI_MODE = "mock";
+    sitesEnv.AI_REQUESTS_ENABLED = "false";
+    await evaluate("gameClient.disconnect()");
+    assert.equal(await evaluate("scene.state.equipped"), null);
+    assert.equal(
+      await evaluate("document.querySelector('#wardrobe').children.length"),
+      0,
+    );
+    assert.equal(await evaluate("scene.arrived"), false);
+    assert.equal(
+      await evaluate(
+        "lastRecommendation === undefined && pendingOrder === undefined && session === undefined",
+      ),
+      true,
+    );
+    sitesEnv.SITES_OWNER_USER_ID = "synthetic-new-owner";
+    await call(
+      "Network.setExtraHTTPHeaders",
+      {
+        headers: {
+          "oai-authenticated-user-id": "synthetic-new-owner",
+          "oai-authenticated-user-email": "new@example.invalid",
+        },
+      },
+      sessionId,
+    );
+    await evaluate("run(boot)");
+    await wait("!!session && scene.state.equipped===null");
+    assert.equal(
+      await evaluate(
+        "scene.state.borrowed || scene.state.seal || scene.state.rumor",
+      ),
+      false,
+    );
+    await screenshot("sites-account-reset");
+    console.log(
+      "PASS Sites recovery browser: hanging/503 analytics; lost equip response + reconnect + same-key recovery (one event); quest logging failure; synchronous account reset. Local SQLite D1 fixture only.",
+    );
+  } catch (error) {
+    console.error("Sites browser failure:", error);
+    throw error;
   } finally {
+    releaseAnalytics();
+    sitesServer.closeAllConnections();
     await new Promise((r) => sitesServer.close(r));
     sitesDB.close();
   }
   console.log(
     "PASS simplified goal → two choices → preview → explicit confirmation; free/owned/paid paths; no preview mutation; quote isolation; lost create/capture response and delayed notification; cancellation/reload/repeated restoration; desktop/390px/200% CSS reflow; Tab/Enter free route; authenticated demo. MOCK only.",
   );
+} catch (error) {
+  console.error("Browser failure:", error);
+  throw error;
 } finally {
+  releaseAnalytics();
   socket?.close();
   browser.kill();
+  server.closeAllConnections();
   await new Promise((r) => server.close(r));
   store.close();
   await new Promise((r) =>
