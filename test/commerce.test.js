@@ -254,6 +254,7 @@ test("outbox retries unacknowledged delivery without accepting arbitrary metadat
   await deliverOutbox(s, {
     accept: async (e) => {
       received = e;
+      return { id: e.id, status: "accepted" };
     },
   });
   assert.equal(received.id, first.id);

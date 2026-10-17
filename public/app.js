@@ -7,6 +7,80 @@ let gameSnapshot;
 let previewSku;
 let lastRecommendation;
 let pendingRecommendation;
+let gameClient;
+let funnelSequence = 0;
+const gameClientReady = import("/game-client.js").then(
+  ({ GameCommerceClient }) => {
+    gameClient = new GameCommerceClient({ onReset: resetAccountView });
+    return gameClient;
+  },
+);
+function resetAccountView() {
+  if (session) {
+    $("#goal").value = "";
+    $("#budget").value = "3.00";
+  }
+  session = undefined;
+  activeOrder = pendingOrder = previewSku = gameSnapshot = undefined;
+  lastRecommendation = pendingRecommendation = undefined;
+  funnelSequence++;
+  scene.update({
+    owned: [],
+    entitlements: [],
+    previews: [],
+    equipped: null,
+    borrowed: false,
+    seal: false,
+    rumor: false,
+    formal: false,
+    canEnter: false,
+  });
+  scene.player = { x: 110, y: 350 };
+  scene.target = { ...scene.player };
+  scene.arrived = false;
+  scene.near = null;
+  scene.keys.clear();
+  for (const id of [
+    "choices",
+    "choice-goal",
+    "choice-note",
+    "plan",
+    "products",
+    "comparison",
+    "checkout",
+    "quote",
+    "purchase-details",
+    "pending-purchase",
+    "wardrobe",
+    "dialogue-actions",
+    "dialogue-text",
+    "requirements",
+    "guard",
+    "restore-summary",
+    "progress-summary",
+    "next-step",
+    "preview-options",
+    "look-reactions",
+    "preview-caption",
+    "preview-brief",
+    "status",
+    "funnel",
+    "alternative",
+    "ai-result-status",
+  ])
+    $(`#${id}`).replaceChildren();
+  delete $("#checkout").dataset.orderId;
+  for (const id of ["preview", "loan-preview"])
+    $(`#${id}`).getContext("2d").clearRect(0, 0, 240, 140);
+  $("#choice-step").hidden = $("#browse-step").hidden = true;
+  $("#recommend").hidden = false;
+  $("#plan-details").hidden = $("#comparison").hidden = true;
+  $("#ai-notice").hidden = true;
+  $("#ai-notice").textContent = "";
+  $("#mode").textContent = "Connecting…";
+  showStage("shop");
+  syncControls();
+}
 const names = {
   "rosalyn-gala": "Rosalyn Gala Outfit",
   "rosalyn-traveler": "Traveler’s Cloak",
@@ -110,35 +184,60 @@ function renderChoices() {
     story &&
     !lastRecommendation.interpretation.clarify &&
     !lastRecommendation.interpretation.avoidStyles.includes("formal");
-  const ownedChoice = lastRecommendation.plan.actions.find((a) =>
-    ["equip", "keep_owned"].includes(a.type) && g.owned.includes(a.sku));
-  $("#choice-note").textContent = lastRecommendation.dialogue?.text ?? (offerFormal
-    ? "The same story is open for free. Buying is optional."
-    : (lastRecommendation.plan.actions[0]?.label ?? "Choose your next step."));
-  $("#ai-result-status").textContent = lastRecommendation.ai?.notice ??
-    (lastRecommendation.mode === "openai" ? "AI interpreted your goal; game rules checked the choices." : "Offline guide · no AI call.");
-  const freeLabel = ownedChoice || (offerFormal && ownedFormal)
-    ? ko ? "보유한 옷 입기 · 무료" : "Wear what I own · Free"
-    : offerFormal ? ko ? "무료로 빌리기" : "Borrow for free"
-      : ko ? "지금 옷 유지 · 무료" : "Keep my outfit · Free";
+  const ownedChoice = lastRecommendation.plan.actions.find(
+    (a) => ["equip", "keep_owned"].includes(a.type) && g.owned.includes(a.sku),
+  );
+  $("#choice-note").textContent =
+    lastRecommendation.dialogue?.text ??
+    (offerFormal
+      ? "The same story is open for free. Buying is optional."
+      : (lastRecommendation.plan.actions[0]?.label ??
+        "Choose your next step."));
+  $("#ai-result-status").textContent =
+    lastRecommendation.ai?.notice ??
+    (lastRecommendation.mode === "openai"
+      ? "AI interpreted your goal; game rules checked the choices."
+      : "Offline guide · no AI call.");
+  const freeLabel =
+    ownedChoice || (offerFormal && ownedFormal)
+      ? ko
+        ? "보유한 옷 입기 · 무료"
+        : "Wear what I own · Free"
+      : offerFormal
+        ? ko
+          ? "무료로 빌리기"
+          : "Borrow for free"
+        : ko
+          ? "지금 옷 유지 · 무료"
+          : "Keep my outfit · Free";
   const canBrowse = lastRecommendation.products.length > 0;
   $("#choices").replaceChildren(
-    button(
-      freeLabel,
-      () =>
-        ownedChoice ? previewAccess(ownedChoice.sku) : offerFormal
+    button(freeLabel, () =>
+      ownedChoice
+        ? previewAccess(ownedChoice.sku)
+        : offerFormal
           ? previewAccess(ownedFormal?.sku ?? "borrowed")
           : showStage("world"),
     ),
-    button(canBrowse
-      ? ko ? "원하는 옷 살펴보기 · 구매는 선택" : "Find a look to buy · Optional"
-      : ko ? "안뜰 둘러보기 · 무료" : "Explore the courtyard · Free", () => {
-      if (!canBrowse) { showStage("world"); return; }
-      $("#choice-step").hidden = true;
-      $("#browse-step").hidden = false;
-      $("#browse-step h1").tabIndex = -1;
-      $("#browse-step h1").focus();
-    }),
+    button(
+      canBrowse
+        ? ko
+          ? "원하는 옷 살펴보기 · 구매는 선택"
+          : "Find a look to buy · Optional"
+        : ko
+          ? "안뜰 둘러보기 · 무료"
+          : "Explore the courtyard · Free",
+      () => {
+        if (!canBrowse) {
+          showStage("world");
+          return;
+        }
+        $("#choice-step").hidden = true;
+        $("#browse-step").hidden = false;
+        $("#browse-step h1").tabIndex = -1;
+        $("#browse-step h1").focus();
+      },
+    ),
   );
   $("#choices button").focus();
 }
@@ -238,18 +337,7 @@ function button(label, action) {
   return b;
 }
 async function api(path, data) {
-  const r = await fetch(path, {
-    signal: AbortSignal.timeout(15000),
-    method: data === undefined ? "GET" : "POST",
-    headers:
-      data === undefined
-        ? {}
-        : { "Content-Type": "application/json", "X-CSRF-Token": session.csrf },
-    ...(data === undefined ? {} : { body: JSON.stringify(data) }),
-  });
-  const out = await r.json();
-  if (!r.ok) throw new Error(out.error);
-  return out;
+  return gameClient.request(path, data);
 }
 async function run(fn) {
   if (busy) return;
@@ -294,7 +382,7 @@ function savedSummary(g) {
   return `Wearing: ${effective ? names[g.equipped] : "your starting clothes"}. Owned collection: ${g.owned.length ? g.owned.map((sku) => names[sku]).join(", ") : "none"}. Free loan: ${g.borrowed ? "available, not owned" : "not borrowed yet"}.`;
 }
 async function wear(sku) {
-  await api("/api/game/equip", { sku });
+  await gameClient.equip(sku);
   await refresh();
   showStage("world");
   $("#world").focus();
@@ -331,10 +419,7 @@ function storyStep(g) {
     );
 }
 async function refresh() {
-  const [g, f] = await Promise.all([
-    api("/api/game"),
-    api("/api/analytics/funnel"),
-  ]);
+  const g = await gameClient.refresh();
   const snapshot = JSON.stringify(g);
   if (gameSnapshot && gameSnapshot !== snapshot) {
     lastRecommendation = undefined;
@@ -369,14 +454,37 @@ async function refresh() {
         previewAccess(sku),
       ),
     );
+  if (gameClient.pendingEquip)
+    $("#wardrobe").append(
+      button("Recover pending outfit change", async () => {
+        await gameClient.recoverEquip();
+        await refresh();
+      }),
+    );
   $("#guard").textContent = g.canEnter
     ? "Guard: All three checks pass. Welcome inside!"
     : `Guard: ${g.reaction}`;
   $("#requirements").textContent =
     `Formal outfit ${g.formal ? "✓" : "○"} · Seal ${g.seal ? "✓" : "○"} · Rumor ${g.rumor ? "✓" : "○"}`;
-  $("#funnel").replaceChildren(
-    ...f.map((e) => text("span", `${e.name}: ${e.count}`, "metric")),
-  );
+  // Diagnostics must never delay initial rendering, choices, equip or quests.
+  void refreshFunnel();
+}
+async function refreshFunnel() {
+  const sequence = ++funnelSequence,
+    epoch = gameClient.epoch;
+  const current = () =>
+    sequence === funnelSequence && epoch === gameClient.epoch;
+  try {
+    const f = await gameClient.readFunnel();
+    if (current())
+      $("#funnel").replaceChildren(
+        ...f.map((e) => text("span", `${e.name}: ${e.count}`, "metric")),
+      );
+  } catch {
+    if (current())
+      $("#funnel").textContent =
+        "Analytics unavailable. Game progress is still available.";
+  }
 }
 function resetFittingRoom() {
   const previous = pendingOrder;
@@ -630,13 +738,16 @@ $("#recommend").onsubmit = (e) => {
     let result;
     try {
       result = await api("/api/commerce/agent/recommend", {
-        ...input, requestId: pendingRecommendation.requestId,
+        ...input,
+        requestId: pendingRecommendation.requestId,
       });
     } catch (e) {
-      if (e.message === "ai_request_conflict") pendingRecommendation = undefined;
+      if (e.message === "ai_request_conflict")
+        pendingRecommendation = undefined;
       throw e;
     }
-    if (result.ai?.reason !== "ai_request_pending") pendingRecommendation = undefined;
+    if (result.ai?.reason !== "ai_request_pending")
+      pendingRecommendation = undefined;
     $("#plan").replaceChildren(
       text("h3", "Your goal plan"),
       text(
@@ -702,7 +813,8 @@ document.querySelectorAll("[data-quest]").forEach(
       })),
 );
 async function boot() {
-  session = await api("/api/session");
+  await gameClientReady;
+  session = await gameClient.connect();
   $("#global-error").hidden = true;
   $("#ai-notice").textContent =
     session.aiMode === "openai"

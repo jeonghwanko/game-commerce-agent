@@ -113,6 +113,8 @@ One entitlement per `(user, SKU)`, one order per quote, one local owner per prov
 
 ## Scope and next steps
 
+- [PR3 recovery work](docs/game-bridge-recovery.md) adds a public game client and host sample, account-safe reconnect/equip recovery, Sites outbox delivery with strict ACKs, and non-blocking optional analytics. It is local implementation and mock validation, not an actual private-game or hosted Site integration.
+
 - The original scene is playable; [private-game integration](docs/private-integration-proposal.md) remains a separate, unexecuted proposal. Preserve its seal, outfit and rumor predicates.
 - OneSub’s MIT entitlement evaluator is now actually reused by `src/entitlements.js`, after filtering out unverified, held or wrong-owner ledger records. The pinned extracted core, types, copyright and license are in `src/vendor/onesub`; [notices](THIRD_PARTY_NOTICES.md) identify the exact source. 324 differential cases match the pinned upstream evaluator. No Apple/Google platform impersonation or mobile SDK is involved.
 - mimi-seed-sdk code is not copied. A trusted external adapter can consume the documented outbox contract and [example aggregate queries](docs/analytics.sql).

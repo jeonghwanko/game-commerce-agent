@@ -2,24 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-
-export const EVENT_NAMES = new Set([
-  "shop_opened",
-  "agent_query_submitted",
-  "product_recommended",
-  "product_selected",
-  "checkout_started",
-  "buyer_approved",
-  "payment_captured",
-  "payment_failed",
-  "payment_pending",
-  "checkout_cancelled",
-  "entitlement_granted",
-  "review_required",
-  "item_equipped",
-  "npc_reaction_triggered",
-  "free_quest_completed",
-]);
+import { EVENT_NAMES, eventLimit, eventIds } from "./events.js";
+export { EVENT_NAMES } from "./events.js";
 export class Store {
   constructor(path = ":memory:") {
     if (path !== ":memory:")
@@ -35,6 +19,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, order_id TEXT, name TEXT NOT NULL, at INTEGER NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS mock_orders (id TEXT PRIMARY KEY, reference TEXT NOT NULL UNIQUE, amount INTEGER NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL, capture_id TEXT);
       CREATE TABLE IF NOT EXISTS game (user_id TEXT PRIMARY KEY, equipped TEXT, seal INTEGER NOT NULL DEFAULT 0, rumor INTEGER NOT NULL DEFAULT 0, borrowed INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS equip_requests (user_id TEXT NOT NULL, request_id TEXT NOT NULL, sku TEXT NOT NULL, PRIMARY KEY(user_id,request_id));
       CREATE TABLE IF NOT EXISTS environment (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS external_budgets (name TEXT PRIMARY KEY, used INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS external_budget_policy (name TEXT PRIMARY KEY, ceiling INTEGER NOT NULL, concurrency INTEGER NOT NULL, window_ms INTEGER NOT NULL, started INTEGER NOT NULL);
@@ -94,14 +79,25 @@ export class Store {
   outbox(limit = 100) {
     return this.all(
       "SELECT id,user_id,order_id,name,at FROM events WHERE delivered=0 ORDER BY at,id LIMIT ?",
-      limit,
+      eventLimit(limit),
     );
   }
   acknowledge(ids) {
+    eventIds(ids);
     this.transaction(() => {
       for (const id of ids)
         this.run("UPDATE events SET delivered=1 WHERE id=?", id);
     });
+  }
+  // Optional game/UX observations only. Payment audit events still use event()
+  // inside their authority transaction and must fail closed on write failure.
+  observe(...args) {
+    try {
+      this.event(...args);
+      return true;
+    } catch {
+      return false;
+    }
   }
   close() {
     this.db.close();

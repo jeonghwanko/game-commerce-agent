@@ -199,7 +199,13 @@ export function createSitesWorker({
         );
         if (
           request.method === "GET" &&
-          ["/", "/app.js", "/scene.js", "/style.css"].includes(path)
+          [
+            "/",
+            "/app.js",
+            "/scene.js",
+            "/game-client.js",
+            "/style.css",
+          ].includes(path)
         ) {
           const asset = assets[path];
           requireThat(asset, "site_assets_unavailable", 503);
@@ -218,6 +224,17 @@ export function createSitesWorker({
         const s = new D1Ledger(env.DB),
           user = await pseudonym(id),
           sess = await session(s, user);
+        requireThat(
+          !request.headers.get("x-commerce-scope") ||
+            request.headers.get("x-commerce-scope") === user,
+          "account_changed",
+          409,
+        );
+        const scopedJSON = (data, status = 200) =>
+          Response.json(data, {
+            status,
+            headers: { ...responseHeaders, "x-commerce-scope": user },
+          });
         const game = new D1Game(s),
           mode = env.PAYMENT_PROVIDER ?? "unconfigured";
         requireThat(
@@ -255,29 +272,33 @@ export function createSitesWorker({
         };
         if (request.method === "GET") {
           if (path === "/api/session")
-            return json({
+            return scopedJSON({
               csrf: sess.csrf,
+              scope: user,
               paymentMode: mode,
               aiMode: sitesAIMode(env),
               authMode: "principal",
               gameHost: "independent-sandbox-demo",
             });
-          if (path === "/api/commerce/catalog") return json(catalog);
+          if (path === "/api/commerce/catalog") return scopedJSON(catalog);
           if (path === "/api/game") {
             const state = await game.state(user);
-            return json({ ...state, previews: lookPreviews(state, catalog) });
+            return scopedJSON({
+              ...state,
+              previews: lookPreviews(state, catalog),
+            });
           }
           if (path === "/api/commerce/entitlements")
-            return json((await game.state(user)).entitlements);
+            return scopedJSON((await game.state(user)).entitlements);
           if (path === "/api/commerce/orders")
-            return json(
+            return scopedJSON(
               await s.all(
                 "SELECT id,sku,amount,currency,status FROM sites_orders WHERE user_id=? ORDER BY created DESC LIMIT 20",
                 user,
               ),
             );
           if (path === "/api/analytics/funnel")
-            return json(
+            return scopedJSON(
               await s.all(
                 "SELECT name,count(*) count FROM sites_events WHERE user_id=? GROUP BY name",
                 user,
@@ -289,7 +310,7 @@ export function createSitesWorker({
         );
         if (order && request.method === "GET" && !order[2]) {
           const c = await payment();
-          return json(c.view(await c.owned(user, order[1])));
+          return scopedJSON(c.view(await c.owned(user, order[1])));
         }
         if (request.method === "POST") {
           requireThat(
@@ -322,29 +343,38 @@ export function createSitesWorker({
                 b.budgetMinor <= 100000,
               "invalid_budget",
             );
-            return json(
+            return scopedJSON(
               await sitesRecommend(
-                s, env, user, b, await game.state(user), fetcher, aiTimeoutMs,
+                s,
+                env,
+                user,
+                b,
+                await game.state(user),
+                fetcher,
+                aiTimeoutMs,
                 () => game.state(user),
               ),
             );
           }
           if (path === "/api/game/interact")
-            return json(await game.begin(user, b.npc));
+            return scopedJSON(await game.begin(user, b.npc));
           if (path === "/api/game/quest")
-            return json(await game.quest(user, b));
+            return scopedJSON(await game.quest(user, b));
           if (path === "/api/game/equip")
-            return json(await game.equip(user, b.sku));
+            return scopedJSON(await game.equip(user, b.sku, b.requestId));
           if (path === "/api/commerce/quotes")
-            return json(await (await payment()).quote(user, b.sku), 201);
+            return scopedJSON(await (await payment()).quote(user, b.sku), 201);
           if (path === "/api/commerce/orders")
-            return json(await (await payment()).create(user, b), 201);
+            return scopedJSON(await (await payment()).create(user, b), 201);
           if (order) {
             const c = await payment(),
               id = order[1];
-            if (order[2] === "capture") return json(await c.capture(user, id));
-            if (order[2] === "cancel") return json(await c.cancel(user, id));
-            if (order[2] === "resume") return json(await c.resume(user, id, b));
+            if (order[2] === "capture")
+              return scopedJSON(await c.capture(user, id));
+            if (order[2] === "cancel")
+              return scopedJSON(await c.cancel(user, id));
+            if (order[2] === "resume")
+              return scopedJSON(await c.resume(user, id, b));
             if (order[2] === "mock-approve") {
               requireThat(mode === "mock", "mock_disabled", 404);
               const o = await c.owned(user, id);
@@ -355,7 +385,7 @@ export function createSitesWorker({
               );
               await c.p.approve(o.provider_id);
               await c.capture(user, id);
-              return json(
+              return scopedJSON(
                 await c.settle(
                   id,
                   await c.p.inspect(o.provider_id),

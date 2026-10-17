@@ -30,12 +30,14 @@ async function copyModule(file) {
   await writeFile(out, source);
 }
 await copyModule(resolve(root, "sites/worker.js"));
+await copyModule(resolve(root, "sites/outbox.js"));
 for (const name of [
   "LICENSE",
   "THIRD_PARTY_NOTICES.md",
   "src/vendor/onesub/LICENSE",
   "sites/migrations/0001_commerce.sql",
   "sites/migrations/0002_ai_requests.sql",
+  "sites/migrations/0003_equip_requests.sql",
   "sites/README.md",
   "docs/sites-ai-dialogue.md",
   "docs/sites-access-validation.md",
@@ -46,13 +48,15 @@ for (const name of [
 }
 const assets = Object.fromEntries(
   await Promise.all(
-    ["/", "/app.js", "/scene.js", "/style.css"].map(async (path) => [
-      path,
-      await readFile(
-        resolve(root, "public", path === "/" ? "index.html" : path.slice(1)),
-        "utf8",
-      ),
-    ]),
+    ["/", "/app.js", "/scene.js", "/game-client.js", "/style.css"].map(
+      async (path) => [
+        path,
+        await readFile(
+          resolve(root, "public", path === "/" ? "index.html" : path.slice(1)),
+          "utf8",
+        ),
+      ],
+    ),
   ),
 );
 await writeFile(

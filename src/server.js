@@ -149,7 +149,9 @@ export function createApp({
       }
       if (
         req.method === "GET" &&
-        ["/", "/app.js", "/scene.js", "/style.css"].includes(path)
+        ["/", "/app.js", "/scene.js", "/game-client.js", "/style.css"].includes(
+          path,
+        )
       ) {
         const file = path === "/" ? "index.html" : path.slice(1);
         res.setHeader(
@@ -196,10 +198,13 @@ export function createApp({
             "Set-Cookie",
             `gca_session=${raw}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${origin.startsWith("https:") ? "; Secure" : ""}`,
           );
-          store.event(session.user_id, "shop_opened");
+          store.observe(session.user_id, "shop_opened");
         }
+        requireThat(session, "session_required", 401);
+        res.setHeader("X-Commerce-Scope", session.user_id);
         return send(200, {
           csrf: session.csrf,
+          scope: session.user_id,
           paymentMode: provider.name,
           aiMode: recommender.mode,
           authMode,
@@ -208,6 +213,13 @@ export function createApp({
       }
       requireThat(session, "session_required", 401);
       const user = session.user_id;
+      res.setHeader("X-Commerce-Scope", user);
+      requireThat(
+        !req.headers["x-commerce-scope"] ||
+          req.headers["x-commerce-scope"] === user,
+        "account_changed",
+        409,
+      );
       requireThat(
         !url.searchParams.has("userId") && !url.searchParams.has("user_id"),
         "session_identity_only",
@@ -279,19 +291,19 @@ export function createApp({
           requireThat(!inFlightAI.has(user), "recommendation_in_progress", 429);
           inFlightAI.add(user);
           try {
-            store.event(user, "agent_query_submitted");
+            store.observe(user, "agent_query_submitted");
             const recommend = () => recommender.recommend(b, game.state(user));
             const r = await (recommender.mode === "openai"
               ? aiBudget.run(recommend)
               : recommend());
-            if (r.products.length) store.event(user, "product_recommended");
+            if (r.products.length) store.observe(user, "product_recommended");
             return send(200, r);
           } finally {
             inFlightAI.delete(user);
           }
         }
         if (path === "/api/game/equip")
-          return send(200, game.equip(user, b.sku));
+          return send(200, game.equip(user, b.sku, b.requestId));
         if (path === "/api/game/interact") {
           requireThat(demoHost, "demo_host_required", 404);
           return send(200, demoHost.begin(user, b.npc));
